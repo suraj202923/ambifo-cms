@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="panel narrow">
+  <h2>Database Setup</h2>
+  <p class="hint">PostgreSQL connection is not available. Enter database details and save them to appsettings.json.</p>
+  {% if db_error %}
+    <div class="alert error" style="margin-top:0.6rem;">
+      Last startup error: {{ db_error }}
+    </div>
+  {% endif %}
+
+  <form method="post" class="grid-form" style="margin-top:0.8rem;">
+    <label>Host
+      <input name="host" value="{{ form_data.host }}" required>
+    </label>
+    <label>Port
+      <input name="port" value="{{ form_data.port }}" required>
+    </label>
+    <label>Database Name
+      <input name="name" value="{{ form_data.name }}" required>
+    </label>
+    <label>User
+      <input name="user" value="{{ form_data.user }}" required>
+    </label>
+    <label>Password
+      <input type="password" name="password" value="{{ form_data.password }}">
+    </label>
+    <label>SSL Mode
+      <select name="sslmode">
+        {% for m in ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'] %}
+          <option value="{{ m }}" {% if form_data.sslmode == m %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn" type="submit">Test And Save</button>
+  </form>
+
+  <p class="hint" style="margin-top:0.8rem;">After saving valid credentials, restart the app service.</p>
+</section>
+{% endblock %}

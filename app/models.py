@@ -1,0 +1,283 @@
+from datetime import datetime
+
+from flask_login import UserMixin
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import check_password_hash, generate_password_hash
+
+
+db = SQLAlchemy()
+
+
+class Customer(db.Model):
+    __tablename__ = "customers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    account_name = db.Column(db.String(255), nullable=True)
+    customer_name = db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(255), nullable=False, unique=True)
+    phone = db.Column(db.String(100), nullable=True)
+    city = db.Column(db.String(120), nullable=True)
+    aws_id = db.Column(db.String(120), nullable=True)
+    opportunity_id = db.Column(db.String(120), nullable=True)
+    segment = db.Column(db.String(80), nullable=True)
+    deal_status = db.Column(db.String(80), nullable=True)
+    comment = db.Column(db.Text, nullable=True)
+    next_action_planned = db.Column(db.Text, nullable=True)
+    assign_to_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    assigned_to = db.relationship("User", foreign_keys=[assign_to_user_id])
+
+
+class OpportunityHistory(db.Model):
+    __tablename__ = "opportunity_histories"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    changed_by = db.Column(db.String(80), nullable=True)
+    action = db.Column(db.String(40), nullable=False)
+    tag_name = db.Column(db.String(40), nullable=True, index=True)
+    changes_summary = db.Column(db.Text, nullable=False)
+    remark = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="history_entries")
+
+
+class EmailTemplate(db.Model):
+    __tablename__ = "email_templates"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, unique=True)
+    subject_template = db.Column(db.String(255), nullable=False)
+    body_template = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class EmailLog(db.Model):
+    __tablename__ = "email_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("email_templates.id"), nullable=True)
+    recipient_email = db.Column(db.String(255), nullable=True)   # stored for all sends
+    email_type = db.Column(db.String(40), nullable=False)
+    subject = db.Column(db.String(255), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(40), nullable=False)
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="email_logs")
+    template = db.relationship("EmailTemplate", backref="email_logs")
+
+
+class GatheringRequest(db.Model):
+    __tablename__ = "gathering_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False)
+    note = db.Column(db.Text, nullable=True)
+    expires_at = db.Column(db.DateTime, nullable=True, index=True)
+    access_key_hash = db.Column(db.String(255), nullable=True)
+    access_key_hint = db.Column(db.String(8), nullable=True)
+    access_verified_at = db.Column(db.DateTime, nullable=True)
+    sheet_file_name = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(40), nullable=False, default="sent")
+    company_website = db.Column(db.String(255), nullable=True)
+    current_tools = db.Column(db.Text, nullable=True)
+    pain_points = db.Column(db.Text, nullable=True)
+    submitted_sheet_path = db.Column(db.String(500), nullable=True)
+    submitted_at = db.Column(db.DateTime, nullable=True)
+    is_locked = db.Column(db.Boolean, nullable=False, default=False)
+    locked_at = db.Column(db.DateTime, nullable=True)
+    locked_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="gathering_requests")
+
+
+class CustomerDocument(db.Model):
+    __tablename__ = "customer_documents"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(500), nullable=True)
+    file_path = db.Column(db.String(500), nullable=True)
+    blob_url = db.Column(db.String(1000), nullable=True)
+    storage_backend = db.Column(db.String(20), nullable=False, default="local")
+    file_size_bytes = db.Column(db.Integer, nullable=True)
+    mime_type = db.Column(db.String(120), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    uploaded_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="documents")
+
+
+class GatheringServerDetail(db.Model):
+    __tablename__ = "gathering_server_details"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    gathering_request_id = db.Column(db.Integer, db.ForeignKey("gathering_requests.id"), nullable=True, index=True)
+    server_name = db.Column(db.String(255), nullable=False)
+    cpu_cores = db.Column(db.Integer, nullable=True)
+    memory_mb = db.Column(db.Integer, nullable=True)
+    provisioned_storage_gb = db.Column(db.Float, nullable=True)
+    operating_system = db.Column(db.String(255), nullable=True)
+    is_virtual = db.Column(db.Boolean, nullable=True)
+    hypervisor_name = db.Column(db.String(255), nullable=True)
+    cpu_string = db.Column(db.String(255), nullable=True)
+    environment = db.Column(db.String(80), nullable=True)
+    sql_edition = db.Column(db.String(255), nullable=True)
+    application = db.Column(db.String(255), nullable=True)
+    cpu_utilization_peak = db.Column(db.Float, nullable=True)
+    memory_utilization_peak = db.Column(db.Float, nullable=True)
+    time_in_use = db.Column(db.Float, nullable=True)
+    annual_cost_usd = db.Column(db.Float, nullable=True)
+    storage_type = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="gathering_server_details")
+    gathering_request = db.relationship("GatheringRequest", backref="server_details")
+
+
+class GatheringFileNasDetail(db.Model):
+    __tablename__ = "gathering_file_nas_details"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    gathering_request_id = db.Column(db.Integer, db.ForeignKey("gathering_requests.id"), nullable=True, index=True)
+    file_server_share_name = db.Column(db.String(255), nullable=False)
+    total_used_capacity_gb = db.Column(db.Float, nullable=True)
+    access_protocol = db.Column(db.String(80), nullable=True)
+    total_provisioned_capacity_gb = db.Column(db.Float, nullable=True)
+    storage_efficiency_ratio = db.Column(db.Float, nullable=True)
+    peak_iops = db.Column(db.Float, nullable=True)
+    peak_throughput_mbps = db.Column(db.Float, nullable=True)
+    average_iops = db.Column(db.Float, nullable=True)
+    average_throughput_mbps = db.Column(db.Float, nullable=True)
+    storage_pool_name = db.Column(db.String(255), nullable=True)
+    array_name = db.Column(db.String(255), nullable=True)
+    array_vendor = db.Column(db.String(255), nullable=True)
+    average_latency_ms = db.Column(db.Float, nullable=True)
+    application = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="gathering_file_nas_details")
+    gathering_request = db.relationship("GatheringRequest", backref="file_nas_details")
+
+
+class GatheringBlockStorageDetail(db.Model):
+    __tablename__ = "gathering_block_storage_details"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    gathering_request_id = db.Column(db.Integer, db.ForeignKey("gathering_requests.id"), nullable=True, index=True)
+    volume_name = db.Column(db.String(255), nullable=False)
+    total_used_capacity_gb = db.Column(db.Float, nullable=True)
+    total_provisioned_capacity_gb = db.Column(db.Float, nullable=True)
+    peak_iops = db.Column(db.Float, nullable=True)
+    peak_throughput_mbps = db.Column(db.Float, nullable=True)
+    average_iops = db.Column(db.Float, nullable=True)
+    average_throughput_mbps = db.Column(db.Float, nullable=True)
+    array_name = db.Column(db.String(255), nullable=True)
+    average_latency_ms = db.Column(db.Float, nullable=True)
+    application = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="gathering_block_storage_details")
+    gathering_request = db.relationship("GatheringRequest", backref="block_storage_details")
+
+
+class SystemSetting(db.Model):
+    __tablename__ = "system_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    setting_key = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    setting_value = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    @classmethod
+    def get_value(cls, key, default=None):
+        setting = cls.query.filter_by(setting_key=key).first()
+        return setting.setting_value if setting else default
+
+    @classmethod
+    def set_value(cls, key, value):
+        setting = cls.query.filter_by(setting_key=key).first()
+        if setting:
+            setting.setting_value = value
+        else:
+            setting = cls(setting_key=key, setting_value=value)
+            db.session.add(setting)
+
+
+class OpportunityStatus(db.Model):
+    __tablename__ = "opportunity_statuses"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    color = db.Column(db.String(20), nullable=False, default="#8a8f98")
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OpportunitySegment(db.Model):
+    __tablename__ = "opportunity_segments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OpportunityUpdateTag(db.Model):
+    __tablename__ = "opportunity_update_tags"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(40), nullable=False, unique=True, index=True)
+    color = db.Column(db.String(20), nullable=False, default="#6b7280")
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MeetingInvite(db.Model):
+    __tablename__ = "meeting_invites"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    recipient_email = db.Column(db.String(255), nullable=False)
+    subject = db.Column(db.String(255), nullable=False)
+    meeting_link = db.Column(db.Text, nullable=False)
+    agenda = db.Column(db.Text, nullable=True)
+    required_data = db.Column(db.Text, nullable=True)
+    scheduled_at = db.Column(db.DateTime, nullable=True, index=True)
+    created_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="meeting_invites")
+
+
+class User(UserMixin, db.Model):
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    email = db.Column(db.String(255), nullable=True, unique=True, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    is_active_user = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def set_password(self, plain_password):
+        self.password_hash = generate_password_hash(plain_password)
+
+    def check_password(self, plain_password):
+        return check_password_hash(self.password_hash, plain_password)
+
+    @property
+    def is_active(self):
+        return self.is_active_user

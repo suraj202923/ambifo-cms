@@ -1,0 +1,263 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>Dashboard</h2>
+    <div class="dashboard-filters">
+      <label>Range
+        <select id="dbPeriod" onchange="onPeriodChange()">
+          <option value="weekly">Weekly</option>
+          <option value="monthly" selected>Monthly</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="yearly">Yearly</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      <label id="dbStartWrap" style="display:none;">From
+        <input type="date" id="dbStart">
+      </label>
+      <label id="dbEndWrap" style="display:none;">To
+        <input type="date" id="dbEnd">
+      </label>
+      <button class="btn btn-sm" type="button" onclick="loadDashboardGraphs()">Apply</button>
+    </div>
+  </div>
+  <p class="hint">Date filter applies to graphs only. History panel remains independent and uses tag filter.</p>
+
+  <div class="dashboard-layout">
+    <div class="dashboard-main">
+      <div class="dashboard-summary" id="dbSummary">Loading summary...</div>
+      <div class="dashboard-charts-grid">
+        <div class="dashboard-chart-card">
+          <h4>Assigned User Wise</h4>
+          <div id="assignChart" class="db-chart-slot"></div>
+        </div>
+        <div class="dashboard-chart-card">
+          <h4>Segment Wise</h4>
+          <div id="segmentChart" class="db-chart-slot"></div>
+        </div>
+        <div class="dashboard-chart-card">
+          <h4>Status Wise</h4>
+          <div id="statusChart" class="db-chart-slot"></div>
+        </div>
+        <div class="dashboard-chart-card">
+          <h4>Country Wise</h4>
+          <div id="countryChart" class="db-chart-slot"></div>
+        </div>
+        <div class="dashboard-chart-card full">
+          <h4>City Wise</h4>
+          <div id="cityChart" class="db-chart-slot"></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="dashboard-side">
+      <div class="dashboard-side-head">
+        <h3>Chat History</h3>
+        <div class="dashboard-side-controls">
+          <select id="dbHistoryTag" onchange="loadDashboardHistory()">
+            <option value="important" selected>important</option>
+            <option value="all">all</option>
+            {% for t in update_tags %}
+              <option value="{{ t.name }}">{{ t.name }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-sm" type="button" onclick="loadDashboardHistory()">Refresh</button>
+        </div>
+      </div>
+      <div id="dbHistoryList" class="dashboard-history-list">
+        <p class="hint">Loading updates...</p>
+      </div>
+
+      <div class="dashboard-side-head" style="margin-top:0.85rem;">
+        <h3>Upcoming Meetings</h3>
+      </div>
+      <div id="dbUpcomingMeetingsList" class="dashboard-history-list" style="max-height:38vh;">
+        <p class="hint">Loading upcoming meetings...</p>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<script>
+var DB_COLORS = ['#2a9d8f','#4d96ff','#f4a259','#7c3aed','#be123c','#14b8a6','#d97706','#0ea5e9','#84cc16','#6b7280','#ef4444','#a855f7'];
+
+function onPeriodChange() {
+  var p = document.getElementById('dbPeriod').value;
+  var showCustom = p === 'custom';
+  document.getElementById('dbStartWrap').style.display = showCustom ? 'inline-flex' : 'none';
+  document.getElementById('dbEndWrap').style.display = showCustom ? 'inline-flex' : 'none';
+}
+
+function _renderPie(id, labels, values) {
+  var root = document.getElementById(id);
+  if (!root) return;
+  if (!labels.length || !values.length) {
+    root.innerHTML = '<p class="hint">No data for selected range.</p>';
+    return;
+  }
+
+  var total = values.reduce(function(a,b){ return a + b; }, 0);
+  if (!total) {
+    root.innerHTML = '<p class="hint">No data for selected range.</p>';
+    return;
+  }
+
+  var supportsConic = window.CSS && CSS.supports && CSS.supports('background', 'conic-gradient(#000 0% 50%, #fff 50% 100%)');
+  if (!supportsConic) {
+    _renderBar(id, labels, values);
+    return;
+  }
+
+  var parts = [];
+  var start = 0;
+  for (var i = 0; i < labels.length; i++) {
+    var pct = (values[i] / total) * 100;
+    var end = start + pct;
+    parts.push(DB_COLORS[i % DB_COLORS.length] + ' ' + start.toFixed(2) + '% ' + end.toFixed(2) + '%');
+    start = end;
+  }
+
+  var legend = '';
+  for (var j = 0; j < labels.length; j++) {
+    var lp = total ? Math.round((values[j] * 100) / total) : 0;
+    legend += '<div class="db-legend-item">'
+      + '<span class="db-swatch" style="background:' + DB_COLORS[j % DB_COLORS.length] + ';"></span>'
+      + '<span class="db-legend-label">' + escapeHtml(labels[j]) + '</span>'
+      + '<span class="db-legend-value">' + values[j] + ' (' + lp + '%)</span>'
+      + '</div>';
+  }
+
+  root.innerHTML = '<div class="db-pie-wrap">'
+    + '<div class="db-pie" style="background:conic-gradient(' + parts.join(',') + ');"></div>'
+    + '<div class="db-legend">' + legend + '</div>'
+    + '</div>';
+}
+
+function _renderBar(id, labels, values) {
+  var root = document.getElementById(id);
+  if (!root) return;
+  if (!labels.length || !values.length) {
+    root.innerHTML = '<p class="hint">No data for selected range.</p>';
+    return;
+  }
+  var maxVal = Math.max.apply(null, values.concat([1]));
+  var rows = '';
+  for (var i = 0; i < labels.length; i++) {
+    var w = Math.max(4, Math.round((values[i] * 100) / maxVal));
+    rows += '<div class="db-bar-row">'
+      + '<div class="db-bar-label">' + escapeHtml(labels[i]) + '</div>'
+      + '<div class="db-bar-track"><div class="db-bar-fill" style="width:' + w + '%;background:' + DB_COLORS[i % DB_COLORS.length] + ';"></div></div>'
+      + '<div class="db-bar-value">' + values[i] + '</div>'
+      + '</div>';
+  }
+  root.innerHTML = '<div class="db-bars">' + rows + '</div>';
+}
+
+function loadDashboardGraphs() {
+  var period = document.getElementById('dbPeriod').value;
+  var start = document.getElementById('dbStart').value;
+  var end = document.getElementById('dbEnd').value;
+  var qs = new URLSearchParams({ period: period });
+  if (period === 'custom') {
+    qs.set('start', start || '');
+    qs.set('end', end || '');
+  }
+
+  fetch('/dashboard/graph-data?' + qs.toString())
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (!data.success) return;
+      var p = data.data;
+      document.getElementById('dbSummary').textContent =
+        'Total opportunities: ' + p.summary.total_opportunities + ' | Range: ' + p.summary.from + ' to ' + p.summary.to;
+
+      _renderPie('assignChart', p.assign.labels, p.assign.values);
+      _renderPie('segmentChart', p.segment.labels, p.segment.values);
+      _renderPie('statusChart', p.status.labels, p.status.values);
+      _renderPie('countryChart', p.country.labels, p.country.values);
+      _renderBar('cityChart', p.city.labels, p.city.values);
+    })
+    .catch(function(){
+      document.getElementById('dbSummary').textContent = 'Failed to load graph data.';
+    });
+}
+
+function loadDashboardHistory() {
+  var tag = document.getElementById('dbHistoryTag').value || 'important';
+  fetch('/dashboard/history-data?tag=' + encodeURIComponent(tag) + '&limit=30')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var list = document.getElementById('dbHistoryList');
+      if (!data.success) {
+        list.innerHTML = '<p class="hint">Unable to load updates.</p>';
+        return;
+      }
+      if (!data.items || data.items.length === 0) {
+        list.innerHTML = '<p class="hint">No updates found.</p>';
+        return;
+      }
+      var html = '';
+      data.items.forEach(function(i){
+        html += '<div class="dashboard-history-item">'
+          + '<div class="dashboard-history-meta">' + escapeHtml(i.created_at) + ' • ' + escapeHtml(i.customer_name)
+          + ' <span class="dashboard-tag" style="background:' + escapeHtml(i.tag_color || '#6b7280') + ';">' + escapeHtml(i.tag || 'update') + '</span></div>'
+          + '<div class="dashboard-history-text">' + escapeHtml(i.changes_summary || '') + '</div>'
+          + (i.remark ? '<div class="dashboard-history-remark">Remark: ' + escapeHtml(i.remark) + '</div>' : '')
+          + '</div>';
+      });
+      list.innerHTML = html;
+      loadUpcomingMeetings(tag);
+    })
+    .catch(function(){
+      document.getElementById('dbHistoryList').innerHTML = '<p class="hint">Request failed while loading updates.</p>';
+      loadUpcomingMeetings(tag);
+    });
+}
+
+function loadUpcomingMeetings(tag) {
+  fetch('/dashboard/upcoming-meetings-data?tag=' + encodeURIComponent(tag || 'all') + '&limit=20')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var list = document.getElementById('dbUpcomingMeetingsList');
+      if (!data.success) {
+        list.innerHTML = '<p class="hint">Unable to load upcoming meetings.</p>';
+        return;
+      }
+      if (!data.items || data.items.length === 0) {
+        list.innerHTML = '<p class="hint">No upcoming meetings for selected tag.</p>';
+        return;
+      }
+      var html = '';
+      data.items.forEach(function(i){
+        html += '<div class="dashboard-history-item">'
+          + '<div class="dashboard-history-meta">' + escapeHtml(i.scheduled_at || 'TBD') + ' • ' + escapeHtml(i.customer_name) + '</div>'
+          + '<div class="dashboard-history-text"><strong>' + escapeHtml(i.subject || '') + '</strong><br>'
+          + '<a href="' + escapeHtml(i.meeting_link || '#') + '" target="_blank" rel="noopener">Join Meeting</a></div>'
+          + '<div class="dashboard-history-remark">To: ' + escapeHtml(i.recipient_email || '') + ' • By: ' + escapeHtml(i.created_by || 'system') + '</div>'
+          + '</div>';
+      });
+      list.innerHTML = html;
+    })
+    .catch(function(){
+      document.getElementById('dbUpcomingMeetingsList').innerHTML = '<p class="hint">Request failed while loading upcoming meetings.</p>';
+    });
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+    .replace(/\n/g, '<br>');
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  onPeriodChange();
+  loadDashboardGraphs();
+  loadDashboardHistory();
+});
+</script>
+{% endblock %}

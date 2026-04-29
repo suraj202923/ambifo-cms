@@ -1,0 +1,178 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>Configuration</h2>
+  <p class="hint">Use the right panel to jump to section. Make add, update, and delete changes from the left panel.</p>
+
+  <div class="config-layout">
+    <div class="config-left">
+      <section class="panel config-card mobile-collapsible expanded" id="smtp-config">
+        <h3>SMTP Configuration</h3>
+        <form method="post" class="grid-form">
+          <input type="hidden" name="action" value="save_smtp">
+          <label>SMTP Host<input name="smtp_host" value="{{ smtp.host }}"></label>
+          <label>SMTP Port<input name="smtp_port" value="{{ smtp.port }}"></label>
+          <label>SMTP Username<input name="smtp_username" value="{{ smtp.username }}"></label>
+          <label>SMTP Password<input type="password" name="smtp_password" value="{{ smtp.password }}"></label>
+          <label>Mail From<input name="smtp_mail_from" value="{{ smtp.mail_from }}"></label>
+          <label class="checkbox-row">
+            <input type="checkbox" name="smtp_use_tls" {% if smtp.use_tls %}checked{% endif %}>
+            Use TLS
+          </label>
+          <button class="btn" type="submit">Update SMTP</button>
+        </form>
+
+        <hr>
+        <h4>Send Test Email</h4>
+        <form method="post" class="inline-form">
+          <input type="hidden" name="action" value="test_smtp">
+          <input type="email" name="test_email_to" placeholder="test@example.com" required>
+          <button class="btn" type="submit">Send Test</button>
+        </form>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="teams-config">
+        <h3>Teams Configuration</h3>
+        <p class="hint">If configured, meeting emails auto-create a Teams link. If empty, users must paste a meeting link manually.</p>
+        <form method="post" class="grid-form">
+          <input type="hidden" name="action" value="save_teams">
+          <label>Tenant ID<input name="teams_tenant_id" value="{{ teams.tenant_id if teams else '' }}"></label>
+          <label>Client ID<input name="teams_client_id" value="{{ teams.client_id if teams else '' }}"></label>
+          <label class="full">Client Secret<input type="password" name="teams_client_secret" value="{{ teams.client_secret if teams else '' }}"></label>
+          <label>Organizer ID (UPN or Object ID)<input name="teams_organizer_id" value="{{ teams.organizer_id if teams else '' }}"></label>
+          <label>Default Duration (minutes)<input type="number" min="15" name="teams_default_duration_minutes" value="{{ teams.default_duration_minutes if teams else '60' }}"></label>
+          <button class="btn" type="submit">Update Teams</button>
+        </form>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="status-config">
+        <h3>Status</h3>
+        <form method="post" class="inline-form">
+          <input type="hidden" name="action" value="add_status">
+          <input name="status_name" placeholder="New status name" required>
+          <input type="color" name="status_color" value="#2a9d8f">
+          <button class="btn" type="submit">Add</button>
+        </form>
+
+        <div class="status-list">
+          {% for s in statuses %}
+            <form method="post" class="row-editor">
+              <input type="hidden" name="status_id" value="{{ s.id }}">
+              <span class="status-badge" style="background-color: {{ s.color }};">{{ s.name }}</span>
+              <input name="status_name" value="{{ s.name }}" required>
+              <input type="color" name="status_color" value="{{ s.color }}">
+              <button class="btn" type="submit" name="action" value="update_status">Update</button>
+              <button class="btn btn-danger" type="submit" name="action" value="delete_status" onclick="return confirm('Delete this status?');">Delete</button>
+            </form>
+          {% else %}
+            <p>No statuses yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="segment-config">
+        <h3>Segment</h3>
+        <form method="post" class="inline-form">
+          <input type="hidden" name="action" value="add_segment">
+          <input name="segment_name" placeholder="New segment name" required>
+          <button class="btn" type="submit">Add</button>
+        </form>
+
+        <div class="status-list">
+          {% for seg in segments %}
+            <form method="post" class="row-editor">
+              <input type="hidden" name="segment_id" value="{{ seg.id }}">
+              <input name="segment_name" value="{{ seg.name }}" required>
+              <button class="btn" type="submit" name="action" value="update_segment">Update</button>
+              <button class="btn btn-danger" type="submit" name="action" value="delete_segment" onclick="return confirm('Delete this segment?');">Delete</button>
+            </form>
+          {% else %}
+            <p>No segments yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="update-tags-config">
+        <h3>Update Tags</h3>
+        <p class="hint">These tags are used in the Opportunity list "All Updates" popup.</p>
+        <form method="post" class="inline-form">
+          <input type="hidden" name="action" value="add_update_tag">
+          <input name="tag_name" placeholder="New tag name (e.g. important)" required>
+          <input type="color" name="tag_color" value="#6b7280">
+          <button class="btn" type="submit">Add</button>
+        </form>
+
+        <div class="status-list">
+          {% for t in update_tags %}
+            <form method="post" class="row-editor">
+              <input type="hidden" name="tag_id" value="{{ t.id }}">
+              <span class="status-badge" style="background-color: {{ t.color }};">{{ t.name }}</span>
+              <input name="tag_name" value="{{ t.name }}" required>
+              <input type="color" name="tag_color" value="{{ t.color }}">
+              <button class="btn" type="submit" name="action" value="update_update_tag">Update</button>
+              <button class="btn btn-danger" type="submit" name="action" value="delete_update_tag" onclick="return confirm('Delete this update tag?');">Delete</button>
+            </form>
+          {% else %}
+            <p>No update tags configured yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="admin-users-config">
+        <h3>Admin Users</h3>
+        <form method="post" class="inline-form">
+          <input type="hidden" name="action" value="add_admin_user">
+          <input name="admin_username" placeholder="New admin username" required>
+          <input type="email" name="admin_email" placeholder="Admin email" required>
+          <input type="password" name="admin_password" placeholder="Password (min 6 chars)" required>
+          <button class="btn" type="submit">Add Admin</button>
+        </form>
+
+        <div class="status-list">
+          {% for user in admin_users %}
+            <div class="status-item">
+              <span>{{ user.username }}{% if user.email %} ({{ user.email }}){% endif %}</span>
+            </div>
+          {% else %}
+            <p>No admin users yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="restart-config">
+        <h3>Restart Application</h3>
+        <p class="hint">Use this after changing startup-level settings (for example database connection in appsettings.json).</p>
+        <form method="post" onsubmit="return confirm('Restart application now? Current active requests may be interrupted.');">
+          <input type="hidden" name="action" value="restart_app">
+          <button class="btn btn-danger" type="submit">Restart App</button>
+        </form>
+      </section>
+    </div>
+
+    <aside class="panel config-right">
+      <h3>Configuration List</h3>
+      <div class="config-links">
+        <a href="#smtp-config">SMTP Configuration</a>
+        <a href="#teams-config">Teams Configuration</a>
+        <a href="#status-config">Status</a>
+        <a href="#segment-config">Segment</a>
+        <a href="#update-tags-config">Update Tags</a>
+        <a href="#admin-users-config">Admin Users</a>
+        <a href="#restart-config">Restart Application</a>
+      </div>
+    </aside>
+  </div>
+</section>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  if (window.innerWidth > 760) return;
+  document.querySelectorAll('.mobile-collapsible > h3').forEach(function(title) {
+    title.addEventListener('click', function() {
+      var card = title.closest('.mobile-collapsible');
+      if (!card) return;
+      card.classList.toggle('expanded');
+    });
+  });
+});
+</script>
+{% endblock %}

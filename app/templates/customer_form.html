@@ -1,0 +1,781 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>{% if is_edit %}Edit Opportunity — {{ customer.customer_name }}{% else %}Add New Opportunity{% endif %}</h2>
+    <a class="btn btn-secondary" href="{{ url_for('crm.opportunity_list') }}">← Back to List</a>
+  </div>
+
+  {% if is_edit %}
+  <div class="opp-edit-layout">
+  <div class="opp-edit-content">
+  {% endif %}
+
+  <!-- ══ TAB 1: Information ══════════════════════════════ -->
+  <div id="tab-info" class="tab-pane active">
+    <form method="post" class="grid-form" style="margin-top:0.5rem;">
+      <label>Account Name<input name="account_name" value="{{ customer.account_name if customer else '' }}"></label>
+      <label>Customer Name<input name="customer_name" value="{{ customer.customer_name if customer else '' }}" required></label>
+      <label>Email<input type="email" name="email" value="{{ customer.email if customer else '' }}" required></label>
+      <label>Phone<input name="phone" value="{{ customer.phone if customer else '' }}"></label>
+      <label>City<input name="city" value="{{ customer.city if customer else '' }}"></label>
+      <label>AWS ID<input name="aws_id" value="{{ customer.aws_id if customer else '' }}"></label>
+      <label>Opportunity ID<input name="opportunity_id" value="{{ customer.opportunity_id if customer else '' }}"></label>
+      <label>Segment
+        <select name="segment">
+          <option value="">Select segment</option>
+          {% for seg in segment_options %}
+            <option value="{{ seg.name }}" {% if customer and customer.segment == seg.name %}selected{% endif %}>{{ seg.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Status
+        <select name="deal_status">
+          <option value="">Select status</option>
+          {% for s in status_options %}
+            <option value="{{ s.name }}" {% if customer and customer.deal_status == s.name %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Assign To
+        <select name="assign_to_user_id">
+          <option value="">Select admin user</option>
+          {% for admin in admin_users %}
+            <option value="{{ admin.id }}" {% if customer and customer.assign_to_user_id == admin.id %}selected{% endif %}>{{ admin.username }}{% if admin.email %} ({{ admin.email }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      {% if not is_edit %}
+        <label class="checkbox-row full">
+          <input id="send_welcome_email" type="checkbox" name="send_welcome_email" value="1" onchange="toggleWelcomeTemplate()">
+          Send welcome email after save
+        </label>
+        <label id="welcome_template_block" class="full" style="display:none;">Welcome Template
+          <select name="welcome_template_id">
+            <option value="">Select template</option>
+            {% for t in email_templates %}
+              <option value="{{ t.id }}">{{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      {% endif %}
+
+      <label class="full">Comment<textarea name="comment" rows="3">{{ customer.comment if customer else '' }}</textarea></label>
+      <label class="full">Next Action Planned<textarea name="next_action_planned" rows="3">{{ customer.next_action_planned if customer else '' }}</textarea></label>
+
+      {% if is_edit %}
+        <label class="full">Change Remark <span class="hint-inline">(required when updating)</span>
+          <textarea name="change_remark" rows="2" placeholder="Why are you making this change?"></textarea>
+        </label>
+      {% else %}
+        <label class="full">Initial Remark <span class="hint-inline">(optional)</span>
+          <textarea name="change_remark" rows="2" placeholder="Optional note for creation history"></textarea>
+        </label>
+      {% endif %}
+
+      <button class="btn mobile-sticky-submit" type="submit">{% if is_edit %}Update Opportunity{% else %}Save Opportunity{% endif %}</button>
+    </form>
+  </div>
+
+  {% if is_edit %}
+
+  <!-- ══ TAB 2: History ══════════════════════════════════ -->
+  <div id="tab-history" class="tab-pane">
+    <div class="ce-block mobile-collapsible expanded" style="margin-top:0.5rem;">
+      <p class="ce-label">➕ Add Manual Update</p>
+      <form method="post" action="{{ url_for('crm.opportunity_history_add_form', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+        <label>Tag
+          <select name="tag_name" required>
+            {% for t in update_tags %}
+              <option value="{{ t.name }}" {% if t.name == 'important' %}selected{% endif %}>{{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="full">Update / Comment *
+          <textarea name="update_text" rows="3" required placeholder="Enter update/comment"></textarea>
+        </label>
+        <label class="full">Remark (optional)
+          <input name="remark" placeholder="Optional additional note">
+        </label>
+        <button class="btn btn-sm" type="submit">Add Update</button>
+      </form>
+    </div>
+
+    {% if history_entries %}
+      <div class="history-filters" style="margin-top:0.5rem;">
+        <button type="button" class="history-filter-btn active" onclick="setHistoryFilter('all',this)">All</button>
+        <button type="button" class="history-filter-btn" onclick="setHistoryFilter('created',this)">Created</button>
+        <button type="button" class="history-filter-btn" onclick="setHistoryFilter('edited',this)">Edited</button>
+        <button type="button" class="history-filter-btn" onclick="setHistoryFilter('status-updated',this)">Status</button>
+        <button type="button" class="history-filter-btn" onclick="setHistoryFilter('segment-updated',this)">Segment</button>
+        <button type="button" class="history-filter-btn" onclick="setHistoryFilter('gathering-data-added',this)">Gathering</button>
+        <button type="button" class="history-filter-btn" onclick="setHistoryFilter('document-uploaded',this)">Documents</button>
+      </div>
+      <div id="historyFilterSummary" class="hint" style="margin:0.35rem 0 0.5rem;">Showing all entries</div>
+      <div class="status-list" style="max-height:65vh;overflow-y:auto;">
+        {% for h in history_entries %}
+          {% set effective_tag = (h.tag_name or ('email' if h.action.startswith('email') else ('gathering' if 'gathering' in h.action else ('status' if 'status' in h.action else ('segment' if 'segment' in h.action else ('assign' if 'assign' in h.action else 'update'))))) ) %}
+          {% set tag_color = history_tag_colors.get(effective_tag, '#6b7280') if history_tag_colors else '#6b7280' %}
+          <div class="history-item" data-action="{{ h.action }}" style="margin-bottom:0.55rem;">
+            <div class="history-meta">
+              {{ h.created_at.strftime('%Y-%m-%d %H:%M') }} • {{ h.changed_by or 'system' }} • <strong>{{ h.action }}</strong>
+              <span style="display:inline-block;margin-left:0.4rem;padding:0.05rem 0.45rem;border-radius:999px;font-size:0.7rem;font-weight:700;color:#fff;background:{{ tag_color }};">{{ effective_tag }}</span>
+            </div>
+            <div class="history-change">{{ h.changes_summary }}</div>
+            {% if h.remark %}<div class="history-remark">Remark: {{ h.remark }}</div>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="hint" style="margin-top:0.75rem;">No history recorded yet.</p>
+    {% endif %}
+  </div>
+
+  <!-- ══ TAB 3: Gathering Data ═══════════════════════════ -->
+  <div id="tab-gathering" class="tab-pane">
+
+    <!-- Gathering links -->
+    <div class="ce-block mobile-collapsible expanded" style="margin-top:0.5rem;">
+      <p class="ce-label">📨 Gathering Links Sent to Customer</p>
+      {% if gathering_requests %}
+        <div class="table-wrap">
+          <table class="tpl-table">
+            <thead><tr><th>Sent</th><th>Status</th><th>Expiry</th><th>Key Hint</th><th>Form Link (click to copy)</th><th>Actions</th></tr></thead>
+            <tbody>
+            {% for gr in gathering_requests %}
+              <tr>
+                <td style="white-space:nowrap;">{{ gr.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                  <span class="badge-type {% if gr.is_locked %}badge-type-bulk{% elif gr.status == 'submitted' %}badge-type-template{% else %}badge-type-bulk{% endif %}">
+                    {% if gr.is_locked %}🔒 locked{% else %}{{ gr.status }}{% endif %}
+                  </span>
+                </td>
+                <td style="white-space:nowrap;">{{ gr.expires_at.strftime('%Y-%m-%d %H:%M') if gr.expires_at else '—' }}</td>
+                <td>{% if gr.access_key_hint %}••••{{ gr.access_key_hint }}{% else %}—{% endif %}</td>
+                <td>
+                  <input type="text" readonly
+                    value="{{ base_url }}/gathering/form/{{ gr.token }}"
+                    style="width:100%;max-width:340px;font-size:0.78rem;padding:0.28rem 0.45rem;border-radius:5px;border:1px solid #d7ded8;cursor:pointer;"
+                    onclick="this.select();document.execCommand('copy');this.setAttribute('title','Copied!');setTimeout(()=>this.setAttribute('title',''),1500);"
+                    title="Click to copy link">
+                </td>
+                <td style="white-space:nowrap;min-width:200px;">
+                  <div style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;">
+                    <!-- Lock / Unlock -->
+                    {% if gr.is_locked %}
+                      <form method="post" action="{{ url_for('crm.gathering_request_unlock', request_id=gr.id) }}" style="margin:0;" onsubmit="return confirm('Unlock this form so customer can update again?')">
+                        <button class="mini-btn" type="submit" title="Unlock — allow customer to update">🔓 Unlock</button>
+                      </form>
+                    {% else %}
+                      <form method="post" action="{{ url_for('crm.gathering_request_lock', request_id=gr.id) }}" style="margin:0;" onsubmit="return confirm('Lock this form? Customer will not be able to update.')">
+                        <button class="mini-btn danger" type="submit" title="Lock — prevent customer from updating">🔒 Lock</button>
+                      </form>
+                    {% endif %}
+                    <!-- Generate new link -->
+                    <form method="post" action="{{ url_for('crm.gathering_request_renew', request_id=gr.id) }}" style="margin:0;"
+                          onsubmit="return confirm('Generate a new link for this customer? The old link will stay active. A new access key will be created — copy it from the confirmation message.')">
+                      <input type="hidden" name="expiry_days" value="7">
+                      <button class="mini-btn" type="submit" title="Generate a fresh link (old link + data untouched)">🔗 New Link</button>
+                    </form>
+                    <!-- Delete link -->
+                    <form method="post" action="{{ url_for('crm.gathering_request_delete', request_id=gr.id) }}" style="margin:0;"
+                          onsubmit="return confirm('Delete this link? The link will stop working but ALL collected data is preserved. This cannot be undone.')">
+                      <button class="mini-btn danger" type="submit" title="Delete link — collected data is kept">🗑 Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="hint">No gathering links sent yet.</p>
+      {% endif %}
+      <a class="btn btn-sm" href="{{ url_for('crm.send_gathering_request', customer_id=customer.id) }}" style="margin-top:0.65rem;">Send New Gathering Link</a>
+    </div>
+
+    <!-- Main full-workbook import (top) -->
+    <div class="ce-block mobile-collapsible">
+      <p class="ce-label">📥 Main Import (Full 3-Sheet Workbook)</p>
+      <form method="post" action="{{ url_for('crm.opportunity_gathering_data_import', customer_id=customer.id) }}" enctype="multipart/form-data" style="display:flex;gap:0.65rem;flex-wrap:wrap;align-items:flex-end;">
+        <label style="flex:1;min-width:180px;">Workbook (.xlsx recommended)
+          <input type="file" name="import_file" accept=".csv,.xlsx,.xls" required>
+        </label>
+        <button class="btn btn-sm" type="submit">Import All 3 Tables</button>
+        <a class="btn btn-sm btn-secondary" href="{{ url_for('crm.gathering_data_sample_xlsx') }}">⬇ Sample XLSX (3 sheets)</a>
+      </form>
+      <p class="hint" style="margin-top:0.45rem;">Expected sheets: Template, FileNAS Storage (If applicable), Block Storage (If applicable).</p>
+    </div>
+
+    <!-- Per-table manage tabs -->
+    <div class="ce-block mobile-collapsible expanded" style="padding:0.65rem;">
+      <p class="ce-label" style="margin:0 0 0.55rem;">🧩 Manage Data Sections</p>
+      <div class="history-filters" style="margin:0;">
+        <button type="button" class="history-filter-btn active gather-subtab-btn" onclick="switchGatherSubTab('server', this)">Server</button>
+        <button type="button" class="history-filter-btn gather-subtab-btn" onclick="switchGatherSubTab('file-nas', this)">FileNAS</button>
+        <button type="button" class="history-filter-btn gather-subtab-btn" onclick="switchGatherSubTab('block', this)">Block Storage</button>
+      </div>
+    </div>
+
+    <!-- Server section -->
+    <div class="gather-subtab-pane active" id="gather-subtab-server">
+      <div class="ce-block mobile-collapsible">
+        <p class="ce-label">📄 Import Single Sheet - Server</p>
+        <form method="post" action="{{ url_for('crm.opportunity_gathering_data_import_single', customer_id=customer.id, import_target='server') }}" enctype="multipart/form-data" style="display:flex;gap:0.65rem;flex-wrap:wrap;align-items:flex-end;">
+          <label style="flex:1;min-width:180px;">Server sheet file
+            <input type="file" name="import_file" accept=".csv,.xlsx,.xls" required>
+          </label>
+          <button class="btn btn-sm" type="submit">Import Server Sheet</button>
+          <a class="btn btn-sm btn-secondary" href="{{ url_for('crm.gathering_data_sample_csv') }}">⬇ Sample CSV</a>
+        </form>
+      </div>
+
+      <div class="ce-block mobile-collapsible">
+        <p class="ce-label">➕ Add Server Row Manually</p>
+        <form method="post" action="{{ url_for('crm.opportunity_gathering_data_add', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+          <label>Server Name *<input name="server_name" required></label>
+          <label>CPU Cores<input name="cpu_cores" type="number" min="0" step="1"></label>
+          <label>Memory (MB)<input name="memory_mb" type="number" min="0" step="1"></label>
+          <label>Storage (GB)<input name="provisioned_storage_gb" type="number" min="0" step="0.01"></label>
+          <label>Operating System<input name="operating_system"></label>
+          <label>Is Virtual?<select name="is_virtual"><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label>Hypervisor<input name="hypervisor_name"></label>
+          <label>CPU String<input name="cpu_string"></label>
+          <label>Environment<input name="environment" placeholder="Production / Dev"></label>
+          <label>SQL Edition<input name="sql_edition"></label>
+          <label>Application<input name="application"></label>
+          <label>Storage Type<input name="storage_type" placeholder="HDD / SSD / gp3"></label>
+          <label>CPU Util Peak (%)<input name="cpu_utilization_peak" type="number" min="0" max="100" step="0.01"></label>
+          <label>Mem Util Peak (%)<input name="memory_utilization_peak" type="number" min="0" max="100" step="0.01"></label>
+          <label>Time In-Use (%)<input name="time_in_use" type="number" min="0" max="100" step="0.01"></label>
+          <label>Annual Cost (USD)<input name="annual_cost_usd" type="number" min="0" step="0.01"></label>
+          <label class="full">Remark<input name="change_remark" placeholder="Source or notes about this data"></label>
+          <button class="btn btn-sm" type="submit">Save Row</button>
+        </form>
+      </div>
+
+      <div class="table-wrap">
+      <table class="tpl-table">
+        <thead>
+          <tr>
+            <th>Server</th><th>CPU</th><th>Mem(MB)</th><th>Storage(GB)</th>
+            <th>OS</th><th>Env</th><th>App</th><th>Cost</th><th>Added</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in gathering_entries %}
+          <tr>
+            <td><strong>{{ row.server_name }}</strong></td>
+            <td>{{ row.cpu_cores or '—' }}</td>
+            <td>{{ row.memory_mb or '—' }}</td>
+            <td>{{ ('%g' % row.provisioned_storage_gb) if row.provisioned_storage_gb else '—' }} {{ row.storage_type or '' }}</td>
+            <td>{{ row.operating_system or '—' }}</td>
+            <td>{{ row.environment or '—' }}</td>
+            <td>{{ row.application or '—' }}</td>
+            <td>{{ ('$%,.0f' % row.annual_cost_usd) if row.annual_cost_usd else '—' }}</td>
+            <td style="white-space:nowrap;">{{ row.created_at.strftime('%Y-%m-%d') }}</td>
+            <td>
+              <div class="actions-inline">
+                <button class="mini-btn" type="button"
+                  onclick="openGatheringEditModal({{ row.id }},
+                    '{{ row.server_name | e }}',
+                    '{{ row.cpu_cores or '' }}','{{ row.memory_mb or '' }}',
+                    '{{ row.provisioned_storage_gb or '' }}','{{ row.operating_system or '' | e }}',
+                    '{{ 'yes' if row.is_virtual else 'no' }}',
+                    '{{ row.hypervisor_name or '' | e }}','{{ row.cpu_string or '' | e }}',
+                    '{{ row.environment or '' | e }}','{{ row.sql_edition or '' | e }}',
+                    '{{ row.application or '' | e }}','{{ row.storage_type or '' | e }}',
+                    '{{ row.cpu_utilization_peak or '' }}','{{ row.memory_utilization_peak or '' }}',
+                    '{{ row.time_in_use or '' }}','{{ row.annual_cost_usd or '' }}')">✏️ Edit</button>
+                <form method="post" action="{{ url_for('crm.opportunity_gathering_data_delete_from_edit', customer_id=customer.id, entry_id=row.id) }}" onsubmit="return confirm('Delete this gathering entry?');" style="margin:0;">
+                  <button class="mini-btn danger" type="submit">🗑️ Del</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="10" style="color:#888;">No gathering data saved yet. Add rows above or import a CSV.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <!-- FileNAS section -->
+    <div class="gather-subtab-pane" id="gather-subtab-file-nas">
+      <div class="ce-block mobile-collapsible">
+        <p class="ce-label">📄 Import Single Sheet - FileNAS</p>
+        <form method="post" action="{{ url_for('crm.opportunity_gathering_data_import_single', customer_id=customer.id, import_target='file-nas') }}" enctype="multipart/form-data" style="display:flex;gap:0.65rem;flex-wrap:wrap;align-items:flex-end;">
+          <label style="flex:1;min-width:180px;">FileNAS sheet file
+            <input type="file" name="import_file" accept=".csv,.xlsx,.xls" required>
+          </label>
+          <button class="btn btn-sm" type="submit">Import FileNAS Sheet</button>
+          <a class="btn btn-sm btn-secondary" href="{{ url_for('crm.gathering_data_sample_file_nas_csv') }}">⬇ FileNAS Sample CSV</a>
+        </form>
+      </div>
+
+      <div class="ce-block mobile-collapsible">
+        <p class="ce-label">➕ Add FileNAS Row Manually</p>
+        <form method="post" action="{{ url_for('crm.opportunity_gathering_file_nas_add', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+          <label>File Server/Share Name *<input name="file_server_share_name" required></label>
+          <label>Total Used Capacity (GB)<input name="total_used_capacity_gb" type="number" min="0" step="0.01"></label>
+          <label>Access Protocol<input name="access_protocol" placeholder="CIFS / NFS"></label>
+          <label>Total Provisioned Capacity (GB)<input name="total_provisioned_capacity_gb" type="number" min="0" step="0.01"></label>
+          <label>Storage Efficiency Ratio<input name="storage_efficiency_ratio" type="number" min="0" step="0.01"></label>
+          <label>Peak IOPS<input name="peak_iops" type="number" min="0" step="0.01"></label>
+          <label>Peak Throughput (MBps)<input name="peak_throughput_mbps" type="number" min="0" step="0.01"></label>
+          <label>Average IOPS<input name="average_iops" type="number" min="0" step="0.01"></label>
+          <label>Average Throughput (MBps)<input name="average_throughput_mbps" type="number" min="0" step="0.01"></label>
+          <label>Storage Pool Name<input name="storage_pool_name"></label>
+          <label>Array Name<input name="array_name"></label>
+          <label>Array Vendor<input name="array_vendor"></label>
+          <label>Average Latency (ms)<input name="average_latency_ms" type="number" min="0" step="0.01"></label>
+          <label>Application<input name="application"></label>
+          <label class="full">Remark<input name="change_remark" placeholder="Source or notes"></label>
+          <button class="btn btn-sm" type="submit">Save FileNAS Row</button>
+        </form>
+      </div>
+
+      <div class="table-wrap">
+      <h4 style="margin:0 0 0.45rem;">FileNAS Storage Entries</h4>
+      <table class="tpl-table">
+        <thead>
+          <tr>
+            <th>Share Name</th><th>Used (GB)</th><th>Provisioned (GB)</th><th>Protocol</th>
+            <th>Peak IOPS</th><th>Avg Throughput</th><th>Array</th><th>App</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in file_nas_entries %}
+          <tr>
+            <td><strong>{{ row.file_server_share_name }}</strong></td>
+            <td>{{ row.total_used_capacity_gb or '—' }}</td>
+            <td>{{ row.total_provisioned_capacity_gb or '—' }}</td>
+            <td>{{ row.access_protocol or '—' }}</td>
+            <td>{{ row.peak_iops or '—' }}</td>
+            <td>{{ row.average_throughput_mbps or '—' }}</td>
+            <td>{{ row.array_name or '—' }}</td>
+            <td>{{ row.application or '—' }}</td>
+            <td>
+              <div class="actions-inline">
+                <button class="mini-btn" type="button" onclick="openFileNasEditModal({{ row.id }}, '{{ row.file_server_share_name | e }}', '{{ row.total_used_capacity_gb or '' }}', '{{ row.access_protocol or '' | e }}', '{{ row.total_provisioned_capacity_gb or '' }}', '{{ row.storage_efficiency_ratio or '' }}', '{{ row.peak_iops or '' }}', '{{ row.peak_throughput_mbps or '' }}', '{{ row.average_iops or '' }}', '{{ row.average_throughput_mbps or '' }}', '{{ row.storage_pool_name or '' | e }}', '{{ row.array_name or '' | e }}', '{{ row.array_vendor or '' | e }}', '{{ row.average_latency_ms or '' }}', '{{ row.application or '' | e }}')">✏️ Edit</button>
+                <form method="post" action="{{ url_for('crm.opportunity_gathering_file_nas_delete', customer_id=customer.id, entry_id=row.id) }}" onsubmit="return confirm('Delete this FileNAS entry?');" style="margin:0;">
+                  <button class="mini-btn danger" type="submit">🗑️ Del</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" style="color:#888;">No FileNAS rows imported/saved yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <!-- Block Storage section -->
+    <div class="gather-subtab-pane" id="gather-subtab-block">
+      <div class="ce-block mobile-collapsible">
+        <p class="ce-label">📄 Import Single Sheet - Block Storage</p>
+        <form method="post" action="{{ url_for('crm.opportunity_gathering_data_import_single', customer_id=customer.id, import_target='block-storage') }}" enctype="multipart/form-data" style="display:flex;gap:0.65rem;flex-wrap:wrap;align-items:flex-end;">
+          <label style="flex:1;min-width:180px;">Block storage sheet file
+            <input type="file" name="import_file" accept=".csv,.xlsx,.xls" required>
+          </label>
+          <button class="btn btn-sm" type="submit">Import Block Storage Sheet</button>
+          <a class="btn btn-sm btn-secondary" href="{{ url_for('crm.gathering_data_sample_block_storage_csv') }}">⬇ Block Sample CSV</a>
+        </form>
+      </div>
+
+      <div class="ce-block mobile-collapsible">
+        <p class="ce-label">➕ Add Block Storage Row Manually</p>
+        <form method="post" action="{{ url_for('crm.opportunity_gathering_block_storage_add', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+          <label>Volume Name *<input name="volume_name" required></label>
+          <label>Total Used Capacity (GB)<input name="total_used_capacity_gb" type="number" min="0" step="0.01"></label>
+          <label>Total Provisioned Capacity (GB)<input name="total_provisioned_capacity_gb" type="number" min="0" step="0.01"></label>
+          <label>Peak IOPS<input name="peak_iops" type="number" min="0" step="0.01"></label>
+          <label>Peak Throughput (MBps)<input name="peak_throughput_mbps" type="number" min="0" step="0.01"></label>
+          <label>Average IOPS<input name="average_iops" type="number" min="0" step="0.01"></label>
+          <label>Average Throughput (MBps)<input name="average_throughput_mbps" type="number" min="0" step="0.01"></label>
+          <label>Array Name<input name="array_name"></label>
+          <label>Average Latency (ms)<input name="average_latency_ms" type="number" min="0" step="0.01"></label>
+          <label>Application<input name="application"></label>
+          <label class="full">Remark<input name="change_remark" placeholder="Source or notes"></label>
+          <button class="btn btn-sm" type="submit">Save Block Row</button>
+        </form>
+      </div>
+
+      <div class="table-wrap">
+      <h4 style="margin:0 0 0.45rem;">Block Storage Entries</h4>
+      <table class="tpl-table">
+        <thead>
+          <tr>
+            <th>Volume Name</th><th>Used (GB)</th><th>Provisioned (GB)</th><th>Peak IOPS</th>
+            <th>Avg IOPS</th><th>Array</th><th>Latency (ms)</th><th>App</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in block_storage_entries %}
+          <tr>
+            <td><strong>{{ row.volume_name }}</strong></td>
+            <td>{{ row.total_used_capacity_gb or '—' }}</td>
+            <td>{{ row.total_provisioned_capacity_gb or '—' }}</td>
+            <td>{{ row.peak_iops or '—' }}</td>
+            <td>{{ row.average_iops or '—' }}</td>
+            <td>{{ row.array_name or '—' }}</td>
+            <td>{{ row.average_latency_ms or '—' }}</td>
+            <td>{{ row.application or '—' }}</td>
+            <td>
+              <div class="actions-inline">
+                <button class="mini-btn" type="button" onclick="openBlockEditModal({{ row.id }}, '{{ row.volume_name | e }}', '{{ row.total_used_capacity_gb or '' }}', '{{ row.total_provisioned_capacity_gb or '' }}', '{{ row.peak_iops or '' }}', '{{ row.peak_throughput_mbps or '' }}', '{{ row.average_iops or '' }}', '{{ row.average_throughput_mbps or '' }}', '{{ row.array_name or '' | e }}', '{{ row.average_latency_ms or '' }}', '{{ row.application or '' | e }}')">✏️ Edit</button>
+                <form method="post" action="{{ url_for('crm.opportunity_gathering_block_storage_delete', customer_id=customer.id, entry_id=row.id) }}" onsubmit="return confirm('Delete this Block Storage entry?');" style="margin:0;">
+                  <button class="mini-btn danger" type="submit">🗑️ Del</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" style="color:#888;">No Block Storage rows imported/saved yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB 4: Meeting Links ═══════════════════════════ -->
+  <div id="tab-meeting" class="tab-pane">
+    <div class="ce-block" style="margin-top:0.5rem;">
+      <p class="ce-label">📅 Send Teams Meeting Link</p>
+      <form method="post" action="{{ url_for('crm.opportunity_send_meeting_link', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+        <label class="full">Recipient Emails *
+          <input name="recipient_email" required value="{{ customer.email or '' }}" placeholder="email1@example.com, email2@example.com">
+        </label>
+        <label>Subject *
+          <input name="subject" required value="Meeting Invite - {{ customer.customer_name }}">
+        </label>
+        {% if teams_auto_available %}
+        <label class="full">Teams Meeting Link (optional)
+          <input name="meeting_link" placeholder="Leave empty to auto-generate Teams link">
+        </label>
+        {% else %}
+        <label class="full">Teams Meeting Link *
+          <input name="meeting_link" required placeholder="https://teams.microsoft.com/l/meetup-join/...">
+        </label>
+        {% endif %}
+        <label>Meeting Date/Time (optional)
+          <input type="datetime-local" name="meeting_datetime">
+        </label>
+        <label class="full">Agenda *
+          <textarea name="agenda" rows="3" required placeholder="Write the meeting agenda"></textarea>
+        </label>
+        <label class="full">Required Data From Customer *
+          <textarea name="required_data" rows="3" required placeholder="Mention data/documents customer should bring/share"></textarea>
+        </label>
+        <label class="full">Remark (optional)
+          <input name="remark" placeholder="Optional note for All Updates history">
+        </label>
+        <button class="btn btn-sm mobile-sticky-submit" type="submit">Send Meeting Invite</button>
+      </form>
+      <p class="hint" style="margin-top:0.45rem;">This sends the invite email and logs an entry in All Updates history. Auto-generation is available only after Teams config is saved in Configuration page.</p>
+    </div>
+  </div>
+
+  <!-- ══ TAB 5: Documents ═══════════════════════════════ -->
+  <div id="tab-documents" class="tab-pane">
+    <div class="ce-block" style="margin-top:0.5rem;">
+      <p class="ce-label">⬆ Upload Document</p>
+      <form method="post" action="{{ url_for('crm.opportunity_document_upload', customer_id=customer.id) }}"
+            enctype="multipart/form-data" class="grid-form" style="margin-top:0;">
+        <label class="full">File<input type="file" name="document_file" required></label>
+        <label class="full">Description <span class="hint-inline">(optional)</span><input name="doc_description" placeholder="e.g. Signed SOW, Architecture diagram"></label>
+        <button class="btn btn-sm" type="submit">Upload</button>
+      </form>
+    </div>
+
+    <div class="doc-list">
+      {% for doc in documents %}
+        <div class="doc-item">
+          <div class="doc-meta">
+            <div class="doc-name">📄 {{ doc.original_filename }}</div>
+            <div class="doc-info">
+              {{ doc.created_at.strftime('%Y-%m-%d %H:%M') }}
+              &nbsp;|&nbsp;<span class="badge-type">{{ doc.storage_backend | upper }}</span>
+              {% if doc.description %}&nbsp;|&nbsp;{{ doc.description }}{% endif %}
+              {% if doc.uploaded_by %}&nbsp;|&nbsp;by {{ doc.uploaded_by }}{% endif %}
+            </div>
+          </div>
+          <div class="doc-actions">
+            <a class="mini-btn" href="{{ url_for('crm.opportunity_document_download', customer_id=customer.id, doc_id=doc.id) }}">⬇ Download</a>
+            <form method="post" action="{{ url_for('crm.opportunity_document_delete', customer_id=customer.id, doc_id=doc.id) }}" onsubmit="return confirm('Delete this document?');" style="margin:0;">
+              <button class="mini-btn danger" type="submit">🗑️ Delete</button>
+            </form>
+          </div>
+        </div>
+      {% else %}
+        <p class="hint" style="margin-top:0.5rem;">No documents uploaded yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ── Gathering Edit Modal ───────────────────────────── -->
+  <div id="gatheringEditModal" class="email-modal-overlay" style="display:none;" onclick="closeGatheringEditModal(event)">
+    <div class="email-modal-box" style="max-width:680px;max-height:92vh;overflow-y:auto;">
+      <div class="email-modal-header">
+        <span>Edit Gathering Row</span>
+        <button class="email-modal-close" onclick="closeGatheringEditModal(null)">✕</button>
+      </div>
+      <form id="gatheringEditForm" method="post">
+        <div class="email-modal-body">
+          <div class="grid-form" style="margin-top:0;">
+            <label>Server Name *<input name="server_name" id="ge_server_name" required></label>
+            <label>CPU Cores<input name="cpu_cores" id="ge_cpu_cores" type="number" min="0" step="1"></label>
+            <label>Memory (MB)<input name="memory_mb" id="ge_memory_mb" type="number" min="0" step="1"></label>
+            <label>Storage (GB)<input name="provisioned_storage_gb" id="ge_storage" type="number" min="0" step="0.01"></label>
+            <label>Operating System<input name="operating_system" id="ge_os"></label>
+            <label>Is Virtual?<select name="is_virtual" id="ge_virtual"><option value="yes">Yes</option><option value="no">No</option></select></label>
+            <label>Hypervisor<input name="hypervisor_name" id="ge_hypervisor"></label>
+            <label>CPU String<input name="cpu_string" id="ge_cpustr"></label>
+            <label>Environment<input name="environment" id="ge_env"></label>
+            <label>SQL Edition<input name="sql_edition" id="ge_sql"></label>
+            <label>Application<input name="application" id="ge_app"></label>
+            <label>Storage Type<input name="storage_type" id="ge_stype"></label>
+            <label>CPU Util Peak (%)<input name="cpu_utilization_peak" id="ge_cpu_util" type="number" min="0" max="100" step="0.01"></label>
+            <label>Mem Util Peak (%)<input name="memory_utilization_peak" id="ge_mem_util" type="number" min="0" max="100" step="0.01"></label>
+            <label>Time In-Use (%)<input name="time_in_use" id="ge_tiu" type="number" min="0" max="100" step="0.01"></label>
+            <label>Annual Cost (USD)<input name="annual_cost_usd" id="ge_cost" type="number" min="0" step="0.01"></label>
+            <label class="full">Remark<input name="change_remark" placeholder="Reason for this edit"></label>
+          </div>
+        </div>
+        <div class="email-modal-footer">
+          <button class="btn" type="submit">Save Changes</button>
+          <button class="btn btn-secondary" type="button" onclick="closeGatheringEditModal(null)">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="fileNasEditModal" class="email-modal-overlay" style="display:none;" onclick="closeFileNasEditModal(event)">
+    <div class="email-modal-box" style="max-width:680px;max-height:92vh;overflow-y:auto;">
+      <div class="email-modal-header">
+        <span>Edit FileNAS Row</span>
+        <button class="email-modal-close" onclick="closeFileNasEditModal(null)">✕</button>
+      </div>
+      <form id="fileNasEditForm" method="post">
+        <div class="email-modal-body">
+          <div class="grid-form" style="margin-top:0;">
+            <label>File Server/Share Name *<input name="file_server_share_name" id="fn_name" required></label>
+            <label>Total Used Capacity (GB)<input name="total_used_capacity_gb" id="fn_used" type="number" min="0" step="0.01"></label>
+            <label>Access Protocol<input name="access_protocol" id="fn_protocol"></label>
+            <label>Total Provisioned Capacity (GB)<input name="total_provisioned_capacity_gb" id="fn_prov" type="number" min="0" step="0.01"></label>
+            <label>Storage Efficiency Ratio<input name="storage_efficiency_ratio" id="fn_eff" type="number" min="0" step="0.01"></label>
+            <label>Peak IOPS<input name="peak_iops" id="fn_peak_iops" type="number" min="0" step="0.01"></label>
+            <label>Peak Throughput (MBps)<input name="peak_throughput_mbps" id="fn_peak_thr" type="number" min="0" step="0.01"></label>
+            <label>Average IOPS<input name="average_iops" id="fn_avg_iops" type="number" min="0" step="0.01"></label>
+            <label>Average Throughput (MBps)<input name="average_throughput_mbps" id="fn_avg_thr" type="number" min="0" step="0.01"></label>
+            <label>Storage Pool Name<input name="storage_pool_name" id="fn_pool"></label>
+            <label>Array Name<input name="array_name" id="fn_array"></label>
+            <label>Array Vendor<input name="array_vendor" id="fn_vendor"></label>
+            <label>Average Latency (ms)<input name="average_latency_ms" id="fn_lat" type="number" min="0" step="0.01"></label>
+            <label>Application<input name="application" id="fn_app"></label>
+            <label class="full">Remark<input name="change_remark" placeholder="Reason for this edit"></label>
+          </div>
+        </div>
+        <div class="email-modal-footer">
+          <button class="btn" type="submit">Save Changes</button>
+          <button class="btn btn-secondary" type="button" onclick="closeFileNasEditModal(null)">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="blockEditModal" class="email-modal-overlay" style="display:none;" onclick="closeBlockEditModal(event)">
+    <div class="email-modal-box" style="max-width:680px;max-height:92vh;overflow-y:auto;">
+      <div class="email-modal-header">
+        <span>Edit Block Storage Row</span>
+        <button class="email-modal-close" onclick="closeBlockEditModal(null)">✕</button>
+      </div>
+      <form id="blockEditForm" method="post">
+        <div class="email-modal-body">
+          <div class="grid-form" style="margin-top:0;">
+            <label>Volume Name *<input name="volume_name" id="bl_name" required></label>
+            <label>Total Used Capacity (GB)<input name="total_used_capacity_gb" id="bl_used" type="number" min="0" step="0.01"></label>
+            <label>Total Provisioned Capacity (GB)<input name="total_provisioned_capacity_gb" id="bl_prov" type="number" min="0" step="0.01"></label>
+            <label>Peak IOPS<input name="peak_iops" id="bl_peak_iops" type="number" min="0" step="0.01"></label>
+            <label>Peak Throughput (MBps)<input name="peak_throughput_mbps" id="bl_peak_thr" type="number" min="0" step="0.01"></label>
+            <label>Average IOPS<input name="average_iops" id="bl_avg_iops" type="number" min="0" step="0.01"></label>
+            <label>Average Throughput (MBps)<input name="average_throughput_mbps" id="bl_avg_thr" type="number" min="0" step="0.01"></label>
+            <label>Array Name<input name="array_name" id="bl_array"></label>
+            <label>Average Latency (ms)<input name="average_latency_ms" id="bl_lat" type="number" min="0" step="0.01"></label>
+            <label>Application<input name="application" id="bl_app"></label>
+            <label class="full">Remark<input name="change_remark" placeholder="Reason for this edit"></label>
+          </div>
+        </div>
+        <div class="email-modal-footer">
+          <button class="btn" type="submit">Save Changes</button>
+          <button class="btn btn-secondary" type="button" onclick="closeBlockEditModal(null)">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% endif %}{# end is_edit #}
+
+  {% if is_edit %}
+  </div>{# end opp-edit-content #}
+
+  <!-- ══ Right sidebar menu ════════════════════════════ -->
+  <aside class="opp-edit-sidebar">
+    <nav class="sidebar-tabs">
+      <button class="sidebar-tab active" data-tab="info" onclick="switchTab('info',this)">ℹ️ Information</button>
+      <button class="sidebar-tab" data-tab="history" onclick="switchTab('history',this)">🕘 History</button>
+      <button class="sidebar-tab" data-tab="gathering" onclick="switchTab('gathering',this)">📋 Gathering Data</button>
+      <button class="sidebar-tab" data-tab="meeting" onclick="switchTab('meeting',this)">📅 Meeting Links</button>
+      <button class="sidebar-tab" data-tab="documents" onclick="switchTab('documents',this)">📁 Documents</button>
+    </nav>
+    {% if customer %}
+    <div class="sidebar-meta">
+      <div class="sidebar-meta-row"><span>Status</span><strong>{{ customer.deal_status or '—' }}</strong></div>
+      <div class="sidebar-meta-row"><span>Segment</span><strong>{{ customer.segment or '—' }}</strong></div>
+      <div class="sidebar-meta-row"><span>Assigned</span><strong>{{ customer.assigned_to.username if customer.assigned_to else '—' }}</strong></div>
+      <div class="sidebar-meta-row"><span>Created</span><strong>{{ customer.created_at.strftime('%Y-%m-%d') }}</strong></div>
+    </div>
+    {% endif %}
+  </aside>
+  </div>{# end opp-edit-layout #}
+  {% endif %}
+</section>
+
+<script>
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+  document.querySelectorAll('.sidebar-tab').forEach(function(b) { b.classList.remove('active'); });
+  var pane = document.getElementById('tab-' + name);
+  if (pane) pane.classList.add('active');
+  if (btn) btn.classList.add('active');
+  try { history.replaceState(null, '', location.pathname + '?tab=' + name); } catch(e) {}
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  var params = new URLSearchParams(location.search);
+  var tab = params.get('tab');
+  if (tab) {
+    var btn = document.querySelector('.sidebar-tab[data-tab="' + tab + '"]');
+    switchTab(tab, btn);
+  }
+  toggleWelcomeTemplate();
+
+  if (window.innerWidth <= 760) {
+    document.querySelectorAll('.mobile-collapsible > .ce-label, .mobile-collapsible > h3').forEach(function(title) {
+      title.style.cursor = 'pointer';
+      title.addEventListener('click', function() {
+        var block = title.closest('.mobile-collapsible');
+        if (!block) return;
+        block.classList.toggle('expanded');
+      });
+    });
+  }
+});
+
+function toggleWelcomeTemplate() {
+  var cb = document.getElementById('send_welcome_email');
+  var bl = document.getElementById('welcome_template_block');
+  if (!cb || !bl) return;
+  bl.style.display = cb.checked ? 'block' : 'none';
+}
+
+function setHistoryFilter(action, btn) {
+  var items = document.querySelectorAll('.history-item');
+  var shown = 0;
+  items.forEach(function(item) {
+    var m = action === 'all' || item.dataset.action === action;
+    item.style.display = m ? 'block' : 'none';
+    if (m) shown++;
+  });
+  document.querySelectorAll('.history-filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  var s = document.getElementById('historyFilterSummary');
+  if (s) s.textContent = 'Showing ' + (action === 'all' ? 'all' : '"' + action + '"') + ' entries (' + shown + ')';
+}
+
+function switchGatherSubTab(name, btn) {
+  document.querySelectorAll('.gather-subtab-pane').forEach(function(p) { p.classList.remove('active'); });
+  document.querySelectorAll('.gather-subtab-btn').forEach(function(b) { b.classList.remove('active'); });
+  var pane = document.getElementById('gather-subtab-' + name);
+  if (pane) pane.classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+function openGatheringEditModal(id, sname, cpu, mem, stor, os, virt, hyp, cpustr, env, sql, app, stype, cpuutil, memutil, tiu, cost) {
+  var editUrl = '/opportunities/{{ customer.id if customer else 0 }}/gathering-data/' + id + '/edit';
+  document.getElementById('gatheringEditForm').action = editUrl;
+  document.getElementById('ge_server_name').value = sname;
+  document.getElementById('ge_cpu_cores').value = cpu;
+  document.getElementById('ge_memory_mb').value = mem;
+  document.getElementById('ge_storage').value = stor;
+  document.getElementById('ge_os').value = os;
+  document.getElementById('ge_virtual').value = virt;
+  document.getElementById('ge_hypervisor').value = hyp;
+  document.getElementById('ge_cpustr').value = cpustr;
+  document.getElementById('ge_env').value = env;
+  document.getElementById('ge_sql').value = sql;
+  document.getElementById('ge_app').value = app;
+  document.getElementById('ge_stype').value = stype;
+  document.getElementById('ge_cpu_util').value = cpuutil;
+  document.getElementById('ge_mem_util').value = memutil;
+  document.getElementById('ge_tiu').value = tiu;
+  document.getElementById('ge_cost').value = cost;
+  document.getElementById('gatheringEditModal').style.display = 'flex';
+}
+
+function closeGatheringEditModal(event) {
+  if (event && event.target !== document.getElementById('gatheringEditModal')) return;
+  document.getElementById('gatheringEditModal').style.display = 'none';
+}
+
+function openFileNasEditModal(id, name, used, protocol, prov, eff, peakIops, peakThr, avgIops, avgThr, pool, arrayName, vendor, lat, app) {
+  document.getElementById('fileNasEditForm').action = '/opportunities/{{ customer.id if customer else 0 }}/gathering-file-nas/' + id + '/edit';
+  document.getElementById('fn_name').value = name;
+  document.getElementById('fn_used').value = used;
+  document.getElementById('fn_protocol').value = protocol;
+  document.getElementById('fn_prov').value = prov;
+  document.getElementById('fn_eff').value = eff;
+  document.getElementById('fn_peak_iops').value = peakIops;
+  document.getElementById('fn_peak_thr').value = peakThr;
+  document.getElementById('fn_avg_iops').value = avgIops;
+  document.getElementById('fn_avg_thr').value = avgThr;
+  document.getElementById('fn_pool').value = pool;
+  document.getElementById('fn_array').value = arrayName;
+  document.getElementById('fn_vendor').value = vendor;
+  document.getElementById('fn_lat').value = lat;
+  document.getElementById('fn_app').value = app;
+  document.getElementById('fileNasEditModal').style.display = 'flex';
+}
+
+function closeFileNasEditModal(event) {
+  if (event && event.target !== document.getElementById('fileNasEditModal')) return;
+  document.getElementById('fileNasEditModal').style.display = 'none';
+}
+
+function openBlockEditModal(id, name, used, prov, peakIops, peakThr, avgIops, avgThr, arrayName, lat, app) {
+  document.getElementById('blockEditForm').action = '/opportunities/{{ customer.id if customer else 0 }}/gathering-block-storage/' + id + '/edit';
+  document.getElementById('bl_name').value = name;
+  document.getElementById('bl_used').value = used;
+  document.getElementById('bl_prov').value = prov;
+  document.getElementById('bl_peak_iops').value = peakIops;
+  document.getElementById('bl_peak_thr').value = peakThr;
+  document.getElementById('bl_avg_iops').value = avgIops;
+  document.getElementById('bl_avg_thr').value = avgThr;
+  document.getElementById('bl_array').value = arrayName;
+  document.getElementById('bl_lat').value = lat;
+  document.getElementById('bl_app').value = app;
+  document.getElementById('blockEditModal').style.display = 'flex';
+}
+
+function closeBlockEditModal(event) {
+  if (event && event.target !== document.getElementById('blockEditModal')) return;
+  document.getElementById('blockEditModal').style.display = 'none';
+}
+</script>
+{% endblock %}

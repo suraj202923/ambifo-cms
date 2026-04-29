@@ -1,0 +1,559 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>Email Templates</h2>
+  <p class="hint">Manage templates on the left. Use the right panel to send emails.</p>
+
+  <div class="config-layout">
+    <div class="config-left">
+
+      <!-- ── Template List with Add / Edit / Delete ── -->
+      <section class="panel config-card" id="template-list">
+        <div class="tpl-list-head">
+          <h3>Email Templates</h3>
+          <button class="btn btn-sm" onclick="toggleAddForm()" type="button">➕ Add Template</button>
+        </div>
+
+        <!-- Add Template (hidden by default) -->
+        <div id="addTemplateForm" class="tpl-inline-form" style="display:none;">
+          <h4>New Template</h4>
+          <p class="hint">Macros:
+            <code>&#123;&#123;customer_name&#125;&#125;</code>
+            <code>&#123;&#123;account_name&#125;&#125;</code>
+            <code>&#123;&#123;email&#125;&#125;</code>
+            <code>&#123;&#123;phone&#125;&#125;</code>
+            <code>&#123;&#123;city&#125;&#125;</code>
+            <code>&#123;&#123;today&#125;&#125;</code>
+            <code>&#123;&#123;gathering_form_link&#125;&#125;</code>
+          </p>
+          <form method="post" class="grid-form">
+            <input type="hidden" name="action" value="add_template">
+            <label>Template Name<input name="name" required placeholder="e.g. Welcome Email"></label>
+            <label class="full">Subject<input id="addSubjectInput" name="subject_template" required placeholder="Hello &#123;&#123;customer_name&#125;&#125;"></label>
+            <label class="full">Body (HTML supported)
+              <textarea id="addBodyTA" name="body_template" rows="8" required placeholder="<p>Dear &#123;&#123;customer_name&#125;&#125;,</p>"></textarea>
+            </label>
+            <div class="tpl-form-actions">
+              <button class="btn mobile-sticky-submit" type="submit">Save Template</button>
+              <button class="btn btn-secondary" type="button"
+                onclick="previewTemplate('addBodyTA', 'addSubjectInput')">👁 Preview</button>
+              <button class="btn btn-secondary" type="button" onclick="toggleAddForm()">Cancel</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Template table -->
+        {% if tpl_pagination.items %}
+        <div class="table-wrap">
+          <table class="tpl-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Subject</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for t in tpl_pagination.items %}
+              <tr id="tpl-row-{{ t.id }}">
+                <td data-label="Name">{{ t.name }}</td>
+                <td data-label="Subject">{{ t.subject_template }}</td>
+                <td data-label="Created">{{ t.created_at.strftime('%Y-%m-%d') }}</td>
+                <td data-label="Actions">
+                  <div class="actions-inline">
+                    <button class="mini-btn" type="button"
+                      onclick="toggleEditForm({{ t.id }})" title="Edit">✏️ Edit</button>
+                    <form method="post" onsubmit="return confirm('Delete template &quot;{{ t.name }}&quot;?');" style="display:inline;">
+                      <input type="hidden" name="action" value="delete_template">
+                      <input type="hidden" name="template_id" value="{{ t.id }}">
+                      <button class="mini-btn danger" type="submit" title="Delete">🗑️ Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              <!-- Inline Edit Row -->
+              <tr id="tpl-edit-{{ t.id }}" style="display:none;">
+                <td colspan="4" class="tpl-edit-cell">
+                  <form method="post" class="grid-form">
+                    <input type="hidden" name="action" value="edit_template">
+                    <input type="hidden" name="template_id" value="{{ t.id }}">
+                    <label>Template Name
+                      <input name="name" required value="{{ t.name }}">
+                    </label>
+                    <label class="full">Subject
+                      <input id="editSubject-{{ t.id }}" name="subject_template" required value="{{ t.subject_template }}">
+                    </label>
+                    <label class="full">Body (HTML supported)
+                      <textarea id="editBody-{{ t.id }}" name="body_template" rows="8" required>{{ t.body_template }}</textarea>
+                    </label>
+                    <div class="tpl-form-actions">
+                      <button class="btn mobile-sticky-submit" type="submit">Update Template</button>
+                      <button class="btn btn-secondary" type="button"
+                        onclick="previewTemplate('editBody-{{ t.id }}', 'editSubject-{{ t.id }}')">👁 Preview</button>
+                      <button class="btn btn-secondary" type="button"
+                        onclick="toggleEditForm({{ t.id }})">Cancel</button>
+                    </div>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Template pagination -->
+        <div class="pagination">
+          {% if tpl_pagination.has_prev %}
+            <a class="page-link" href="{{ url_for('crm.template_list', tpl_page=tpl_pagination.prev_num) }}#template-list">Previous</a>
+          {% else %}
+            <span class="page-link disabled">Previous</span>
+          {% endif %}
+          <span>Page {{ tpl_pagination.page }} of {{ tpl_pagination.pages }}</span>
+          {% if tpl_pagination.has_next %}
+            <a class="page-link" href="{{ url_for('crm.template_list', tpl_page=tpl_pagination.next_num) }}#template-list">Next</a>
+          {% else %}
+            <span class="page-link disabled">Next</span>
+          {% endif %}
+        </div>
+        {% else %}
+          <p class="hint">No templates yet. Click <strong>Add Template</strong> above to create one.</p>
+        {% endif %}
+      </section>
+
+      <!-- ── Send Bulk Email ────────────────────────── -->
+      <section class="panel config-card mobile-collapsible" id="send-bulk">
+        <h3>Send Bulk Email</h3>
+        <p class="hint">Select a template and send it to <strong>all customers</strong> with a valid email address. Macros are personalised per recipient.</p>
+        <form method="post" class="grid-form" onsubmit="return confirm('Send this template to ALL customers? This cannot be undone.');">
+          <input type="hidden" name="action" value="send_bulk_email">
+          <label>Template
+            <select name="template_id" required>
+              <option value="">-- Select Template --</option>
+              {% for t in all_templates %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          {% if all_templates %}
+            <button class="btn mobile-sticky-submit" type="submit">Send to All Customers</button>
+          {% else %}
+            <p class="hint">Create a template first.</p>
+          {% endif %}
+        </form>
+      </section>
+
+      <!-- ── Send Custom Email ──────────────────────── -->
+      <section class="panel config-card mobile-collapsible" id="send-custom">
+        <h3>Send Custom Email</h3>
+
+        <form method="post" id="customEmailForm" class="grid-form">
+          <input type="hidden" name="action" value="send_custom_email">
+
+          <!-- ① Email Content ─────────────────────────── -->
+          <div class="full ce-block">
+            <p class="ce-label">① Email Content</p>
+            <div class="ce-tabs">
+              <label class="ce-tab">
+                <input type="radio" name="email_source" value="template" checked
+                  onchange="toggleEmailSource('template')">
+                Use a Template
+              </label>
+              <label class="ce-tab">
+                <input type="radio" name="email_source" value="custom"
+                  onchange="toggleEmailSource('custom')">
+                Write Custom Email
+              </label>
+            </div>
+
+            <!-- Template picker -->
+            <div id="ceSourceTemplate" class="ce-sub">
+              <label>Template
+                <select name="template_id">
+                  <option value="">-- Select Template --</option>
+                  {% for t in all_templates %}
+                    <option value="{{ t.id }}">{{ t.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+
+            <!-- Custom composer -->
+            <div id="ceSourceCustom" class="ce-sub" style="display:none;">
+              <label class="full">Subject
+                <input name="custom_subject" placeholder="Email subject line">
+              </label>
+              <label class="full">Body (HTML supported)
+                <textarea name="custom_body" rows="8" placeholder="<p>Hello,</p>"></textarea>
+              </label>
+            </div>
+          </div>
+
+          <!-- ② Recipients ─────────────────────────────── -->
+          <div class="full ce-block">
+            <p class="ce-label">② Recipients</p>
+            <div class="ce-tabs">
+              <label class="ce-tab">
+                <input type="radio" name="recipient_mode" value="status"
+                  onchange="switchRecipient('status')"> By Status
+              </label>
+              <label class="ce-tab">
+                <input type="radio" name="recipient_mode" value="segment"
+                  onchange="switchRecipient('segment')"> By Segment
+              </label>
+              <label class="ce-tab">
+                <input type="radio" name="recipient_mode" value="select"
+                  onchange="switchRecipient('select')"> Select Customers
+              </label>
+              <label class="ce-tab">
+                <input type="radio" name="recipient_mode" value="manual_email"
+                  onchange="switchRecipient('manual_email')"> Email Address
+              </label>
+            </div>
+
+            <!-- Option 1: By Status -->
+            <div id="ceRecipStatus" class="ce-sub" style="display:none;">
+              <label>Status — all customers with this status will receive the email
+                <select name="filter_status">
+                  <option value="">-- Select Status --</option>
+                  {% for s in statuses %}
+                    <option value="{{ s.name }}">{{ s.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+
+            <!-- Option 2: By Segment -->
+            <div id="ceRecipSegment" class="ce-sub" style="display:none;">
+              <label>Segment — all customers in this segment will receive the email
+                <select name="filter_segment">
+                  <option value="">-- Select Segment --</option>
+                  {% for seg in segments %}
+                    <option value="{{ seg.name }}">{{ seg.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+
+            <!-- Option 3: Select Customers (JS paginated) -->
+            <div id="ceRecipSelect" class="ce-sub" style="display:none;">
+              <div class="ce-cust-toolbar">
+                <input id="custSearch" type="text" placeholder="Search by name or email…"
+                  oninput="filterCustomers()" class="ce-search">
+                <span id="custCount" class="hint-inline"></span>
+              </div>
+              <div id="ceCustomerList" class="ce-customer-list">
+                {% for c in customers %}
+                  <label class="ce-customer-item"
+                    data-name="{{ c.customer_name | lower }}"
+                    data-email="{{ (c.email or '') | lower }}">
+                    <input type="checkbox" name="selected_customers" value="{{ c.id }}">
+                    {{ c.customer_name }}
+                    <span class="hint-inline">({{ c.email or 'no email' }})</span>
+                  </label>
+                {% else %}
+                  <p class="hint">No customers found.</p>
+                {% endfor %}
+              </div>
+              <!-- Customer pagination -->
+              <div class="pagination" id="custPagination" style="margin-top:0.5rem;">
+                <button class="page-link" type="button" id="custPrev" onclick="changeCustPage(-1)">Previous</button>
+                <span id="custPageInfo"></span>
+                <button class="page-link" type="button" id="custNext" onclick="changeCustPage(1)">Next</button>
+              </div>
+            </div>
+
+            <!-- Option 4: Manual Email -->
+            <div id="ceRecipManual" class="ce-sub" style="display:none;">
+              <label>Email Address
+                <input type="email" name="manual_email" placeholder="someone@example.com">
+              </label>
+              <p class="hint">Macros will not be applied when sending to a manual address.</p>
+            </div>
+          </div>
+
+          <div class="tpl-form-actions full">
+            <button class="btn" type="submit">Send Email</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- ── Email History ──────────────────────────── -->
+      <section class="panel config-card" id="email-history">
+        <h3>Email History</h3>
+        {% if history_pagination.items %}
+        <div class="table-wrap">
+          <table class="tpl-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Recipient</th>
+                <th>Template</th>
+                <th>Subject</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for log in history_pagination.items %}
+              <tr>
+                <td data-label="Date" style="white-space:nowrap;">{{ log.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td data-label="Customer">
+                  {% if log.customer %}
+                    {{ log.customer.customer_name }}
+                  {% else %}
+                    <span class="hint-inline">—</span>
+                  {% endif %}
+                </td>
+                <td data-label="Recipient">{{ log.recipient_email or (log.customer.email if log.customer else '—') }}</td>
+                <td data-label="Template">
+                  {% if log.template %}
+                    {{ log.template.name }}
+                  {% else %}
+                    <span class="badge-custom">Custom Email</span>
+                  {% endif %}
+                </td>
+                <td data-label="Subject">{{ log.subject }}</td>
+                <td data-label="Type">
+                  <span class="badge-type badge-type-{{ log.email_type }}">{{ log.email_type | title }}</span>
+                </td>
+                <td data-label="Status">
+                  {% if log.status in ('sent', 'dev-mode') %}
+                    <span class="badge-status badge-ok">✔ {{ log.status }}</span>
+                  {% else %}
+                    <span class="badge-status badge-fail" title="{{ log.error_message or '' }}">✖ {{ log.status }}</span>
+                  {% endif %}
+                </td>
+                <td data-label="Action">
+                  <form method="post" action="{{ url_for('crm.email_resend', log_id=log.id) }}">
+                    <button class="mini-btn" type="submit" title="Resend">🔁 Resend</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- History pagination -->
+        <div class="pagination">
+          {% if history_pagination.has_prev %}
+            <a class="page-link" href="{{ url_for('crm.template_list', hist_page=history_pagination.prev_num) }}#email-history">Previous</a>
+          {% else %}
+            <span class="page-link disabled">Previous</span>
+          {% endif %}
+          <span>Page {{ history_pagination.page }} of {{ history_pagination.pages }}</span>
+          {% if history_pagination.has_next %}
+            <a class="page-link" href="{{ url_for('crm.template_list', hist_page=history_pagination.next_num) }}#email-history">Next</a>
+          {% else %}
+            <span class="page-link disabled">Next</span>
+          {% endif %}
+        </div>
+        {% else %}
+          <p class="hint">No emails have been sent yet.</p>
+        {% endif %}
+      </section>
+
+    </div><!-- /.config-left -->
+
+    <aside class="panel config-right">
+      <h3>Email Actions</h3>
+      <div class="config-links">
+        <a href="#send-bulk">📨 Send Bulk Email</a>
+        <a href="#send-custom">✉️ Send Custom Email</a>
+        <a href="#email-history">🕐 Email History</a>
+      </div>
+    </aside>
+
+  </div>
+</section>
+
+<script>
+  /* ── Template table ── */
+  function toggleAddForm() {
+    var el = document.getElementById('addTemplateForm');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function toggleEditForm(id) {
+    var editRow = document.getElementById('tpl-edit-' + id);
+    var isHidden = editRow.style.display === 'none';
+    document.querySelectorAll('[id^="tpl-edit-"]').forEach(function(r) {
+      r.style.display = 'none';
+    });
+    editRow.style.display = isHidden ? 'table-row' : 'none';
+  }
+
+  /* ── Custom email: content source ── */
+  function toggleEmailSource(mode) {
+    document.getElementById('ceSourceTemplate').style.display = mode === 'template' ? 'block' : 'none';
+    document.getElementById('ceSourceCustom').style.display  = mode === 'custom'   ? 'block' : 'none';
+  }
+
+  /* ── Custom email: recipient mode ── */
+  var recipPanels = {
+    status:       'ceRecipStatus',
+    segment:      'ceRecipSegment',
+    select:       'ceRecipSelect',
+    manual_email: 'ceRecipManual',
+  };
+
+  function switchRecipient(mode) {
+    Object.values(recipPanels).forEach(function(id) {
+      document.getElementById(id).style.display = 'none';
+    });
+    if (recipPanels[mode]) {
+      document.getElementById(recipPanels[mode]).style.display = 'block';
+    }
+  }
+
+  /* ── Customer list: search + JS pagination ── */
+  var _custPage     = 1;
+  var _custPerPage  = 10;
+  var _custFiltered = [];
+
+  function getAllItems() {
+    return Array.from(document.querySelectorAll('#ceCustomerList .ce-customer-item'));
+  }
+
+  function filterCustomers() {
+    var q = (document.getElementById('custSearch').value || '').toLowerCase().trim();
+    _custFiltered = getAllItems().filter(function(el) {
+      if (!q) return true;
+      return el.dataset.name.includes(q) || el.dataset.email.includes(q);
+    });
+    _custPage = 1;
+    renderCustPage();
+  }
+
+  function renderCustPage() {
+    var items = _custFiltered.length ? _custFiltered : getAllItems();
+    var total = items.length;
+    var pages = Math.max(1, Math.ceil(total / _custPerPage));
+    if (_custPage > pages) _custPage = pages;
+    var start = (_custPage - 1) * _custPerPage;
+    var end   = start + _custPerPage;
+
+    getAllItems().forEach(function(el) { el.style.display = 'none'; });
+    items.slice(start, end).forEach(function(el) { el.style.display = 'flex'; });
+
+    document.getElementById('custPageInfo').textContent = 'Page ' + _custPage + ' of ' + pages + ' (' + total + ' customers)';
+    document.getElementById('custPrev').disabled = _custPage <= 1;
+    document.getElementById('custNext').disabled = _custPage >= pages;
+    document.getElementById('custCount').textContent = total + ' shown';
+  }
+
+  function changeCustPage(delta) {
+    _custPage += delta;
+    renderCustPage();
+  }
+
+  /* Init customer list when "Select Customers" tab is first shown */
+  document.addEventListener('DOMContentLoaded', function() {
+    _custFiltered = getAllItems();
+    renderCustPage();
+
+    if (window.innerWidth <= 760) {
+      document.querySelectorAll('.mobile-collapsible > h3').forEach(function(title) {
+        title.addEventListener('click', function() {
+          var card = title.closest('.mobile-collapsible');
+          if (!card) return;
+          card.classList.toggle('expanded');
+        });
+      });
+    }
+  });
+
+  /* ── Template Preview ───────────────────────────── */
+  {% raw %}
+  var _SAMPLE = {
+    '{{customer_name}}':        'Acme Corporation',
+    '{{account_name}}':         'Acme Corp Account',
+    '{{email}}':                'contact@acme.example.com',
+    '{{phone}}':                '+1 555-123-4567',
+    '{{city}}':                 'Mumbai',
+    '{{today}}':                new Date().toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'}),
+    '{{gathering_form_link}}':  'https://example.com/gathering/form/SAMPLETOKEN',
+    '{{gathering_access_key}}': 'ABCD1234',
+    '{{gathering_expires_at}}': '2026-05-10 12:00 UTC',
+    '{{note}}':                 '(your note to the customer)',
+    '{{opportunity_id}}':       'OPP-0042',
+    '{{deal_status}}':          'In Progress',
+    '{{segment}}':              'Enterprise',
+  };
+  {% endraw %}
+
+  function _applyMacros(text) {
+    Object.keys(_SAMPLE).forEach(function(k) {
+      text = text.split(k).join(_SAMPLE[k]);
+    });
+    return text;
+  }
+
+  function previewTemplate(bodyId, subjectId) {
+    var bodyEl    = document.getElementById(bodyId);
+    var subjectEl = subjectId ? document.getElementById(subjectId) : null;
+    if (!bodyEl) return;
+
+    var subject = _applyMacros(subjectEl ? (subjectEl.value || '') : '');
+    var body    = _applyMacros(bodyEl.value || '');
+
+    var doc = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+      + '<style>body{font-family:Arial,sans-serif;font-size:14px;color:#222;padding:24px 32px;max-width:680px;margin:0 auto;line-height:1.6;}'
+      + 'a{color:#1a6fcc;}img{max-width:100%;}</style></head><body>' + body + '</body></html>';
+
+    document.getElementById('tplPreviewSubject').textContent = subject || '(no subject)';
+    document.getElementById('tplPreviewModal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    requestAnimationFrame(function() {
+      var iframe = document.getElementById('tplPreviewFrame');
+      var iDoc = iframe.contentDocument || iframe.contentWindow.document;
+      iDoc.open();
+      iDoc.write(doc);
+      iDoc.close();
+    });
+  }
+
+  function closeTplPreview() {
+    document.getElementById('tplPreviewModal').style.display = 'none';
+    document.body.style.overflow = '';
+    var iframe = document.getElementById('tplPreviewFrame');
+    var iDoc = iframe.contentDocument || iframe.contentWindow.document;
+    iDoc.open(); iDoc.write(''); iDoc.close();
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeTplPreview();
+  });
+</script>
+
+<!-- ── Template Preview Modal ───────────────────────────────── -->
+<div id="tplPreviewModal"
+  style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.55);align-items:center;justify-content:center;"
+  onclick="if(event.target===this)closeTplPreview()">
+  <div style="background:#fff;border-radius:10px;width:min(94vw,760px);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);overflow:hidden;">
+    <!-- header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.8rem 1.2rem;border-bottom:1px solid #e0e6ec;background:#f6f8fa;flex-shrink:0;">
+      <div>
+        <div style="font-size:0.72rem;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Preview (sample data)</div>
+        <div style="font-weight:600;font-size:0.95rem;" id="tplPreviewSubject"></div>
+      </div>
+      <button onclick="closeTplPreview()" type="button"
+        style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:#666;line-height:1;padding:0 0.2rem;"
+        title="Close">&times;</button>
+    </div>
+    <!-- iframe body -->
+    <iframe id="tplPreviewFrame"
+      style="flex:1;border:none;width:100%;min-height:420px;background:#fff;"
+      srcdoc=""></iframe>
+    <!-- footer -->
+    <div style="padding:0.65rem 1.2rem;border-top:1px solid #e0e6ec;background:#f6f8fa;font-size:0.78rem;color:#888;flex-shrink:0;">
+      Macros replaced with sample values for preview. Press <kbd>Esc</kbd> or click outside to close.
+    </div>
+  </div>
+</div>
+{% endblock %}
+

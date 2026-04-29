@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ambifo – Gathering Form</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <style>
+    .gf-section-title { font-size:1.05rem; font-weight:700; color:var(--brand); margin:1.2rem 0 0.5rem; border-bottom:2px solid var(--line); padding-bottom:0.3rem; }
+    .server-row { border:1px solid var(--line); border-radius:8px; padding:0.85rem; margin-bottom:0.75rem; background:#f9fbf9; }
+    .server-row-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.65rem; font-weight:600; }
+    .server-grid { display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; }
+    .server-grid label { display:flex; flex-direction:column; gap:0.25rem; font-size:0.88rem; }
+    .server-grid input, .server-grid select { padding:0.5rem 0.6rem; border-radius:7px; border:1px solid var(--line); font:inherit; }
+    .gf-note { background:#f0f9f5; border:1px solid #9bd5bc; border-radius:8px; padding:0.75rem 1rem; font-size:0.93rem; margin-bottom:0.75rem; }
+    .success-box { background:#d3f3e6; border:1px solid #9bd5bc; border-radius:8px; padding:1.5rem; text-align:center; }
+    .success-box h3 { margin:0 0 0.5rem; color:#0f4c3a; }
+    .warn-box { background:#fff3e7; border:1px solid #f0bb7f; border-radius:8px; padding:1rem; margin-bottom:1rem; }
+    .error-text { color:#b42318; font-size:0.9rem; margin:0.4rem 0 0; }
+    .import-box { background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:0.85rem; margin:0.65rem 0 1rem; }
+    .import-collapsible,
+    .entry-collapsible { border:1px solid var(--line); border-radius:8px; margin:0.65rem 0 1rem; background:#f8fafc; }
+    .import-collapsible > summary,
+    .entry-collapsible > summary {
+      list-style:none;
+      cursor:pointer;
+      padding:0.75rem 0.85rem;
+      font-weight:600;
+      color:#234;
+      border-radius:8px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:0.6rem;
+    }
+    .import-collapsible > summary::-webkit-details-marker,
+    .entry-collapsible > summary::-webkit-details-marker { display:none; }
+    .import-collapsible > summary::after,
+    .entry-collapsible > summary::after {
+      content:"+";
+      font-size:1rem;
+      width:1.25rem;
+      height:1.25rem;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border:1px solid #c6d4df;
+      border-radius:999px;
+      background:#fff;
+      flex:0 0 auto;
+    }
+    .import-collapsible[open] > summary::after,
+    .entry-collapsible[open] > summary::after { content:"-"; }
+    .import-collapsible-body { padding:0 0.85rem 0.85rem; }
+    .entry-collapsible-body { padding:0 0.85rem 0.85rem; }
+    .import-actions { display:flex; gap:0.45rem; flex-wrap:wrap; margin-top:0.45rem; }
+    .link-actions { display:flex; gap:0.45rem; flex-wrap:wrap; margin-top:0.35rem; }
+    .feedback-ok { background:#e8f7ee; border:1px solid #9bd5bc; border-radius:8px; padding:0.7rem 0.8rem; margin:0.6rem 0; color:#0f4c3a; }
+    .feedback-err { background:#fff1f1; border:1px solid #efc2c2; border-radius:8px; padding:0.7rem 0.8rem; margin:0.6rem 0; color:#8a1c1c; }
+    .count-strip { display:flex; gap:0.5rem; flex-wrap:wrap; margin:0.55rem 0 0.85rem; }
+    .count-pill { background:#f2f7ff; border:1px solid #cdddf6; color:#1e3a5f; border-radius:999px; padding:0.28rem 0.65rem; font-size:0.82rem; font-weight:600; }
+    .locked-box { background:#fff1f1; border:2px solid #efc2c2; border-radius:8px; padding:1rem 1.1rem; margin:0.75rem 0; color:#6b1a1a; }
+    .locked-box h3 { margin:0 0 0.35rem; color:#8a1c1c; font-size:1rem; }
+    .save-bar { position:sticky; top:0; z-index:10; background:#fff; border-bottom:1px solid var(--line); padding:0.55rem 0; margin:0 0 1rem; display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap; }
+    @media (max-width:600px) { .server-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main class="page">
+  <section class="panel narrow">
+    <h2>Customer Information Gathering</h2>
+    <div class="count-strip">
+      <span class="count-pill">Servers: {{ request_record.server_details | length }}</span>
+      <span class="count-pill">FileNAS: {{ request_record.file_nas_details | length }}</span>
+      <span class="count-pill">Block Storage: {{ request_record.block_storage_details | length }}</span>
+    </div>
+    <p class="hint"><strong>Customer:</strong> {{ request_record.customer.customer_name }} ({{ request_record.customer.email }})</p>
+    {% if request_record.expires_at %}
+      <p class="hint"><strong>Link Expiry:</strong> {{ request_record.expires_at.strftime('%Y-%m-%d %H:%M UTC') }}</p>
+    {% endif %}
+
+    {% if is_locked %}
+      <div class="locked-box">
+        <h3>🔒 Form Locked</h3>
+        <p>This gathering form has been locked by Ambifo. You can no longer make changes. Please contact the Ambifo team if you need to update your information.</p>
+        {% if request_record.locked_at %}<p style="font-size:0.82rem;margin-top:0.35rem;">Locked on: {{ request_record.locked_at.strftime('%Y-%m-%d %H:%M UTC') }}{% if request_record.locked_by %} by {{ request_record.locked_by }}{% endif %}</p>{% endif %}
+      </div>
+    {% elif submitted %}
+      <div class="success-box">
+        <h3>✅ Thank You!</h3>
+        <p>Your details have been submitted successfully. The Ambifo team will be in touch shortly.</p>
+      </div>
+    {% elif link_expired %}
+      <div class="warn-box">
+        <h3>Link Expired</h3>
+        <p>This secure link is no longer valid. Please contact the Ambifo team to request a new link.</p>
+      </div>
+    {% elif key_required %}
+      <div class="warn-box">
+        <h3>Enter Access Key</h3>
+        <p>Please enter the access key shared in your email to open this form.</p>
+        <form method="post" class="grid-form">
+          <input type="hidden" name="form_action" value="verify_key">
+          <label class="full">Access Key
+            <input name="access_key" autocomplete="one-time-code" placeholder="Enter access key" required>
+          </label>
+          {% if key_error %}<p class="error-text full">{{ key_error }}</p>{% endif %}
+          <button type="submit" class="btn" style="width:100%;max-width:100%;">Verify & Open Form</button>
+        </form>
+      </div>
+    {% else %}
+
+      {% if request_record.note %}
+        <div class="gf-note"><strong>Note from Ambifo:</strong> {{ request_record.note }}</div>
+      {% endif %}
+
+      {% if just_saved %}
+        <div class="feedback-ok">✅ Your information has been saved successfully. You can continue updating anytime until the form is locked.</div>
+      {% endif %}
+      {% if import_message %}
+        <div class="feedback-ok">{{ import_message }}</div>
+      {% endif %}
+      {% if import_errors %}
+        <div class="feedback-err">
+          {% for msg in import_errors %}
+            <div>{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <p class="gf-section-title">Import From Existing Sheet</p>
+      <details class="import-collapsible" open>
+        <summary>Main Import (Workbook/CSV)</summary>
+        <div class="import-collapsible-body">
+          <form method="post" enctype="multipart/form-data" class="grid-form">
+            <input type="hidden" name="form_action" value="import-main">
+            <label class="full">Main Workbook / CSV (.xlsx, .csv, .xls)
+              <input type="file" name="submitted_sheet" accept=".xlsx,.csv,.xls" required>
+            </label>
+            <div class="import-actions full">
+              <button type="submit" class="btn btn-secondary">Import Main Workbook</button>
+            </div>
+            <div class="link-actions full">
+              <a class="btn btn-secondary" href="{{ url_for('crm.gathering_form_sample_xlsx', token=request_record.token) }}">⬇ Download Main Sample XLSX</a>
+            </div>
+          </form>
+        </div>
+      </details>
+
+      <form method="post" enctype="multipart/form-data" id="gatheringForm">
+
+        <div class="save-bar">
+          <button type="submit" class="btn" style="min-width:180px;">💾 Save &amp; Update</button>
+          <span class="hint" style="font-size:0.82rem;">You can save and return to update your information anytime until the form is locked.</span>
+        </div>
+
+        <p class="gf-section-title">Company Information</p>
+        <div class="grid-form">
+          <label class="full">Company Website<input name="company_website" placeholder="https://yourcompany.com" value="{{ request_record.company_website or '' }}"></label>
+          <label class="full">Current Tools / Process<textarea name="current_tools" rows="3" placeholder="What tools or processes do you currently use?">{{ request_record.current_tools or '' }}</textarea></label>
+          <label class="full">Pain Points / Challenges<textarea name="pain_points" rows="3" placeholder="What are the key challenges you face today?">{{ request_record.pain_points or '' }}</textarea></label>
+        </div>
+
+        <p class="gf-section-title">Server Inventory <span class="hint-inline">— add one row per server / workload</span></p>
+        <details class="import-collapsible" open>
+          <summary>Server Import</summary>
+          <div class="import-collapsible-body">
+            <div class="hint">Import only Server rows</div>
+            <label>Server Import File (.xlsx/.csv/.xls)
+              <input form="gatheringForm" type="file" name="submitted_server_sheet" accept=".xlsx,.csv,.xls">
+            </label>
+            <div class="import-actions">
+              <button type="submit" name="form_action" value="import-server" class="btn btn-secondary">Import Server Sheet</button>
+            </div>
+            <div class="link-actions">
+              <a class="btn btn-secondary" href="{{ url_for('crm.gathering_form_sample_server_csv', token=request_record.token) }}">⬇ Download Server Sample CSV</a>
+            </div>
+          </div>
+        </details>
+        <details class="entry-collapsible" open>
+          <summary>Server Data Entry</summary>
+          <div class="entry-collapsible-body">
+            <div id="server-rows-container"></div>
+            <button type="button" class="btn btn-secondary" style="margin-bottom:1rem;" onclick="addServerRow()">+ Add Another Server</button>
+          </div>
+        </details>
+
+        <p class="gf-section-title">FileNAS Storage <span class="hint-inline">(If applicable)</span></p>
+        <details class="import-collapsible" open>
+          <summary>FileNAS Import</summary>
+          <div class="import-collapsible-body">
+            <div class="hint">Import only FileNAS rows</div>
+            <label>FileNAS Import File (.xlsx/.csv/.xls)
+              <input form="gatheringForm" type="file" name="submitted_file_nas_sheet" accept=".xlsx,.csv,.xls">
+            </label>
+            <div class="import-actions">
+              <button type="submit" name="form_action" value="import-file-nas" class="btn btn-secondary">Import FileNAS Sheet</button>
+            </div>
+            <div class="link-actions">
+              <a class="btn btn-secondary" href="{{ url_for('crm.gathering_form_sample_file_nas_csv', token=request_record.token) }}">⬇ Download FileNAS Sample CSV</a>
+            </div>
+          </div>
+        </details>
+        <details class="entry-collapsible" open>
+          <summary>FileNAS Data Entry</summary>
+          <div class="entry-collapsible-body">
+            <div id="file-nas-rows-container"></div>
+            <button type="button" class="btn btn-secondary" style="margin-bottom:1rem;" onclick="addFileNasRow()">+ Add FileNAS Row</button>
+          </div>
+        </details>
+
+        <p class="gf-section-title">Block Storage <span class="hint-inline">(If applicable)</span></p>
+        <details class="import-collapsible" open>
+          <summary>Block Storage Import</summary>
+          <div class="import-collapsible-body">
+            <div class="hint">Import only Block Storage rows</div>
+            <label>Block Storage Import File (.xlsx/.csv/.xls)
+              <input form="gatheringForm" type="file" name="submitted_block_storage_sheet" accept=".xlsx,.csv,.xls">
+            </label>
+            <div class="import-actions">
+              <button type="submit" name="form_action" value="import-block-storage" class="btn btn-secondary">Import Block Storage Sheet</button>
+            </div>
+            <div class="link-actions">
+              <a class="btn btn-secondary" href="{{ url_for('crm.gathering_form_sample_block_storage_csv', token=request_record.token) }}">⬇ Download Block Storage Sample CSV</a>
+            </div>
+          </div>
+        </details>
+        <details class="entry-collapsible" open>
+          <summary>Block Storage Data Entry</summary>
+          <div class="entry-collapsible-body">
+            <div id="block-storage-rows-container"></div>
+            <button type="button" class="btn btn-secondary" style="margin-bottom:1rem;" onclick="addBlockStorageRow()">+ Add Block Storage Row</button>
+          </div>
+        </details>
+
+      </form>
+    {% endif %}
+  </section>
+</main>
+
+<script>
+var serverRowCount = 0;
+var fileNasRowCount = 0;
+var blockStorageRowCount = 0;
+function addServerRow() {
+  serverRowCount++;
+  var n = serverRowCount;
+  var c = document.getElementById('server-rows-container');
+  var d = document.createElement('div');
+  d.className = 'server-row';
+  d.id = 'server-row-' + n;
+  d.innerHTML =
+    '<div class="server-row-header"><span>Server / Workload #' + n + '</span>' +
+    '<button type="button" class="mini-btn danger" onclick="removeServerRow(' + n + ')">Remove</button></div>' +
+    '<div class="server-grid">' +
+    '<label>Server Name *<input name="server_name[]" placeholder="e.g. Apache01"></label>' +
+    '<label>CPU Cores<input name="cpu_cores[]" type="number" min="0" step="1" placeholder="4"></label>' +
+    '<label>Memory (MB)<input name="memory_mb[]" type="number" min="0" step="1" placeholder="4096"></label>' +
+    '<label>Provisioned Storage (GB)<input name="provisioned_storage_gb[]" type="number" min="0" step="0.01" placeholder="500"></label>' +
+    '<label>Operating System<input name="operating_system[]" placeholder="Windows Server 2019"></label>' +
+    '<label>Is Virtual?<select name="is_virtual[]"><option value="yes">Yes</option><option value="no">No</option></select></label>' +
+    '<label>Hypervisor Name<input name="hypervisor_name[]" placeholder="VMware / Hyper-V / KVM"></label>' +
+    '<label>CPU String<input name="cpu_string[]" placeholder="Intel Xeon E7-8893 v4 @ 3.2GHz"></label>' +
+    '<label>Environment<input name="environment[]" placeholder="Production / Dev / UAT"></label>' +
+    '<label>SQL Edition<input name="sql_edition[]" placeholder="SQL Server 2019 Enterprise"></label>' +
+    '<label>Application<input name="application[]" placeholder="SAP / Oracle / Custom"></label>' +
+    '<label>Storage Type<input name="storage_type[]" placeholder="HDD / SSD / gp3"></label>' +
+    '<label>CPU Util Peak (%)<input name="cpu_utilization_peak[]" type="number" min="0" max="100" step="0.01" placeholder="0.60"></label>' +
+    '<label>Mem Util Peak (%)<input name="memory_utilization_peak[]" type="number" min="0" max="100" step="0.01" placeholder="0.95"></label>' +
+    '<label>Time In-Use (%)<input name="time_in_use[]" type="number" min="0" max="100" step="0.01" placeholder="1.00"></label>' +
+    '<label>Annual Cost (USD)<input name="annual_cost_usd[]" type="number" min="0" step="0.01" placeholder="3400"></label>' +
+    '</div>';
+  c.appendChild(d);
+}
+
+function addFileNasRow() {
+  fileNasRowCount++;
+  var n = fileNasRowCount;
+  var c = document.getElementById('file-nas-rows-container');
+  var d = document.createElement('div');
+  d.className = 'server-row';
+  d.id = 'file-nas-row-' + n;
+  d.innerHTML =
+    '<div class="server-row-header"><span>FileNAS Row #' + n + '</span>' +
+    '<button type="button" class="mini-btn danger" onclick="removeRow(\'file-nas-row-\',' + n + ')">Remove</button></div>' +
+    '<div class="server-grid">' +
+    '<label>File Server/Share Name *<input name="file_server_share_name[]"></label>' +
+    '<label>Total Used Capacity (GB)<input name="file_total_used_capacity_gb[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Access Protocol (CIFS/NFS)<input name="file_access_protocol[]" placeholder="CIFS / NFS"></label>' +
+    '<label>Total Provisioned Capacity (GB)<input name="file_total_provisioned_capacity_gb[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Storage Efficiency Ratio<input name="file_storage_efficiency_ratio[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Peak IOPS<input name="file_peak_iops[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Peak Throughput (MBps)<input name="file_peak_throughput_mbps[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Average IOPS<input name="file_average_iops[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Average Throughput (MBps)<input name="file_average_throughput_mbps[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Storage Pool Name<input name="file_storage_pool_name[]"></label>' +
+    '<label>Array Name<input name="file_array_name[]"></label>' +
+    '<label>Array Vendor<input name="file_array_vendor[]"></label>' +
+    '<label>Average Latency (ms)<input name="file_average_latency_ms[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Application<input name="file_application[]"></label>' +
+    '</div>';
+  c.appendChild(d);
+}
+
+function addBlockStorageRow() {
+  blockStorageRowCount++;
+  var n = blockStorageRowCount;
+  var c = document.getElementById('block-storage-rows-container');
+  var d = document.createElement('div');
+  d.className = 'server-row';
+  d.id = 'block-storage-row-' + n;
+  d.innerHTML =
+    '<div class="server-row-header"><span>Block Storage Row #' + n + '</span>' +
+    '<button type="button" class="mini-btn danger" onclick="removeRow(\'block-storage-row-\',' + n + ')">Remove</button></div>' +
+    '<div class="server-grid">' +
+    '<label>Volume Name *<input name="block_volume_name[]"></label>' +
+    '<label>Total Used Capacity (GB)<input name="block_total_used_capacity_gb[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Total Provisioned Capacity (GB)<input name="block_total_provisioned_capacity_gb[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Peak IOPS<input name="block_peak_iops[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Peak Throughput (MBps)<input name="block_peak_throughput_mbps[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Average IOPS<input name="block_average_iops[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Average Throughput (MBps)<input name="block_average_throughput_mbps[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Array Name<input name="block_array_name[]"></label>' +
+    '<label>Average Latency (ms)<input name="block_average_latency_ms[]" type="number" min="0" step="0.01"></label>' +
+    '<label>Application<input name="block_application[]"></label>' +
+    '</div>';
+  c.appendChild(d);
+}
+
+function removeRow(prefix, n) {
+  var r = document.getElementById(prefix + n);
+  if (r) r.remove();
+}
+
+function removeServerRow(n) { removeRow('server-row-', n); }
+
+function setupImportPanels() {
+  if (!window.matchMedia('(max-width: 768px)').matches) {
+    return;
+  }
+  var panels = document.querySelectorAll('.import-collapsible');
+  panels.forEach(function(panel, idx) {
+    panel.open = idx === 0;
+  });
+}
+
+function setupEntryPanels() {
+  if (!window.matchMedia('(max-width: 768px)').matches) {
+    return;
+  }
+  var panels = document.querySelectorAll('.entry-collapsible');
+  panels.forEach(function(panel, idx) {
+    panel.open = idx === 0;
+  });
+}
+
+setupImportPanels();
+setupEntryPanels();
+addServerRow();
+addFileNasRow();
+addBlockStorageRow();
+</script>
+</body>
+</html>
