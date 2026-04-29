@@ -315,3 +315,7 @@ def create_app():
             print(f"Imported {count} customers from master tracker.")
 
     return app
+
+
+# Expose a module-level WSGI app for servers configured as `gunicorn app:app`.
+app = create_app()
