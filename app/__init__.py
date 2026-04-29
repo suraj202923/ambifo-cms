@@ -380,19 +380,25 @@ def create_app():
     app.config["DB_READY"] = db_ready
     app.config["DB_ERROR"] = db_error
 
-    app.register_blueprint(crm_bp)
-    _register_db_setup_blueprint(app)
-
+    # IMPORTANT: register DB-gate before_request BEFORE blueprints so it runs first.
     @app.before_request
     def require_database_setup():
         if app.config.get("DB_READY"):
             return None
-
         endpoint = request.endpoint or ""
         if endpoint == "static" or endpoint.startswith("setup."):
             return None
-
         return redirect(url_for("setup.database_setup"))
+
+    app.register_blueprint(crm_bp)
+    _register_db_setup_blueprint(app)
+
+    @app.errorhandler(500)
+    def internal_error(exc):
+        """Catch unhandled 500s and redirect to setup page if DB is not ready."""
+        if not app.config.get("DB_READY"):
+            return redirect(url_for("setup.database_setup"))
+        return render_template("error_500.html"), 500
 
     @app.cli.command("init-db")
     @with_appcontext

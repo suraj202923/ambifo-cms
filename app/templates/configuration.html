@@ -58,7 +58,7 @@
           {% for s in statuses %}
             <form method="post" class="row-editor">
               <input type="hidden" name="status_id" value="{{ s.id }}">
-              <span class="status-badge" style="background-color: {{ s.color }};">{{ s.name }}</span>
+              <span class="status-badge dynamic-badge" data-color="{{ s.color }}">{{ s.name }}</span>
               <input name="status_name" value="{{ s.name }}" required>
               <input type="color" name="status_color" value="{{ s.color }}">
               <button class="btn" type="submit" name="action" value="update_status">Update</button>
@@ -106,7 +106,7 @@
           {% for t in update_tags %}
             <form method="post" class="row-editor">
               <input type="hidden" name="tag_id" value="{{ t.id }}">
-              <span class="status-badge" style="background-color: {{ t.color }};">{{ t.name }}</span>
+              <span class="status-badge dynamic-badge" data-color="{{ t.color }}">{{ t.name }}</span>
               <input name="tag_name" value="{{ t.name }}" required>
               <input type="color" name="tag_color" value="{{ t.color }}">
               <button class="btn" type="submit" name="action" value="update_update_tag">Update</button>
@@ -139,6 +139,14 @@
         </div>
       </section>
 
+      <section class="panel config-card mobile-collapsible" id="restart-config">
+        <h3>Restart Application</h3>
+        <p class="hint">Use this after changing startup-level settings (for example database connection in appsettings.json).</p>
+        <form method="post" onsubmit="return confirm('Restart application now? Current active requests may be interrupted.');">
+          <input type="hidden" name="action" value="restart_app">
+          <button class="btn btn-danger" type="submit">Restart App</button>
+        </form>
+      </section>
     </div>
 
     <aside class="panel config-right">
@@ -150,12 +158,20 @@
         <a href="#segment-config">Segment</a>
         <a href="#update-tags-config">Update Tags</a>
         <a href="#admin-users-config">Admin Users</a>
+        <a href="#restart-config">Restart Application</a>
       </div>
     </aside>
   </div>
 </section>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.dynamic-badge').forEach(function(el) {
+    var color = el.getAttribute('data-color');
+    if (color) {
+      el.style.backgroundColor = color;
+    }
+  });
+
   if (window.innerWidth > 760) return;
   document.querySelectorAll('.mobile-collapsible > h3').forEach(function(title) {
     title.addEventListener('click', function() {
