@@ -1,6 +1,9 @@
 import csv
 import json
+import os
+import signal
 from pathlib import Path
+from threading import Timer
 from urllib.parse import quote_plus
 
 from flask import Blueprint, Flask, flash, redirect, render_template, request, url_for
@@ -180,6 +183,13 @@ def _test_database_url_connection(db_url):
         engine.dispose()
 
 
+def _request_process_restart(delay_seconds=1.0):
+    """Restart the full service process (Gunicorn master on Render)."""
+    master_pid = os.getppid()
+    target_pid = master_pid if master_pid and master_pid > 1 else os.getpid()
+    Timer(delay_seconds, lambda: os.kill(target_pid, signal.SIGTERM)).start()
+
+
 def _parse_database_url_parts(db_url, defaults):
     parsed = make_url(db_url)
     query = parsed.query or {}
@@ -275,13 +285,8 @@ def _register_db_setup_blueprint(app):
                     sslmode=parsed_parts["sslmode"],
                     url=connection_url,
                 )
-                # Restart automatically so updated settings are picked up immediately.
-                import os
-
-                from threading import Timer
-
                 flash("Database URL saved successfully. Restarting application...", "success")
-                Timer(1.0, lambda: os._exit(0)).start()
+                _request_process_restart()
                 return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
             if not all([host, port, name, user]):
@@ -299,24 +304,15 @@ def _register_db_setup_blueprint(app):
                 return render_template("db_setup.html", form_data=form_data, db_error=None)
 
             _save_database_settings(app, host, port, name, user, password, sslmode, url="")
-            # Restart automatically so updated settings are picked up immediately.
-            import os
-
-            from threading import Timer
-
             flash("Database settings saved successfully. Restarting application...", "success")
-            Timer(1.0, lambda: os._exit(0)).start()
+            _request_process_restart()
             return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
         return render_template("db_setup.html", form_data=defaults, db_error=app.config.get("DB_ERROR"))
 
     @setup_bp.route("/setup/restart", methods=["POST"])
     def setup_restart():
-        # Delay exit slightly so the response can be returned before process shutdown.
-        import os
-        import threading
-
-        threading.Timer(1.0, lambda: os._exit(0)).start()
+        _request_process_restart()
         flash("Restart requested. The service should come back in a few seconds.", "success")
         return redirect(url_for("setup.database_setup"))
 

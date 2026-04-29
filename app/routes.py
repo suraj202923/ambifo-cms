@@ -46,6 +46,7 @@ from app.services.email_service import EmailService
 from app.services.macro_service import build_macro_values, render_macros
 from app.services.storage_service import StorageService
 from app.services.teams_service import TeamsService
+from app import _request_process_restart
 
 
 crm_bp = Blueprint("crm", __name__)
@@ -1864,8 +1865,7 @@ def configuration():
                 flash("Admin user added.", "success")
 
         elif action == "restart_app":
-            # Delay exit slightly so the redirect response can be returned.
-            threading.Timer(1.0, lambda: os._exit(0)).start()
+            _request_process_restart()
             flash("Restart requested. The service should come back in a few seconds.", "success")
 
         return redirect(url_for("crm.configuration"))
