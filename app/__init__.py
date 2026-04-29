@@ -94,6 +94,7 @@ def _database_settings_file(app):
 def _read_database_defaults(app):
     settings_file = _database_settings_file(app)
     defaults = {
+        "url": "",
         "host": "localhost",
         "port": "5432",
         "name": "ambifo_crm",
@@ -111,6 +112,7 @@ def _read_database_defaults(app):
         return defaults
 
     db_data = data.get("Database") or {}
+    defaults["url"] = str(db_data.get("Url", defaults["url"]))
     defaults["host"] = str(db_data.get("Host", defaults["host"]))
     defaults["port"] = str(db_data.get("Port", defaults["port"]))
     defaults["name"] = str(db_data.get("Name", defaults["name"]))
@@ -120,7 +122,7 @@ def _read_database_defaults(app):
     return defaults
 
 
-def _save_database_settings(app, host, port, name, user, password, sslmode):
+def _save_database_settings(app, host, port, name, user, password, sslmode, url=""):
     settings_file = _database_settings_file(app)
     data = {}
 
@@ -142,7 +144,7 @@ def _save_database_settings(app, host, port, name, user, password, sslmode):
             "User": user,
             "Password": password,
             "SSLMode": sslmode,
-            "Url": "",
+            "Url": (url or "").strip(),
         }
     )
 
@@ -160,6 +162,15 @@ def _build_postgres_url(host, port, name, user, password, sslmode):
 
 def _test_postgres_connection(host, port, name, user, password, sslmode):
     db_url = _build_postgres_url(host, port, name, user, password, sslmode)
+    engine = create_engine(db_url)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    finally:
+        engine.dispose()
+
+
+def _test_database_url_connection(db_url):
     engine = create_engine(db_url)
     try:
         with engine.connect() as conn:
@@ -198,6 +209,7 @@ def _register_db_setup_blueprint(app):
 
         defaults = _read_database_defaults(app)
         if request.method == "POST":
+            connection_url = (request.form.get("connection_url") or "").strip()
             host = (request.form.get("host") or "").strip()
             port = (request.form.get("port") or "").strip()
             name = (request.form.get("name") or "").strip()
@@ -206,6 +218,7 @@ def _register_db_setup_blueprint(app):
             sslmode = (request.form.get("sslmode") or "prefer").strip() or "prefer"
 
             form_data = {
+                "url": connection_url,
                 "host": host,
                 "port": port,
                 "name": name,
@@ -213,6 +226,26 @@ def _register_db_setup_blueprint(app):
                 "password": password,
                 "sslmode": sslmode,
             }
+
+            if connection_url:
+                try:
+                    _test_database_url_connection(connection_url)
+                except Exception as exc:
+                    flash(f"Connection failed: {exc}", "error")
+                    return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
+
+                _save_database_settings(
+                    app,
+                    host=host or defaults["host"],
+                    port=port or defaults["port"],
+                    name=name or defaults["name"],
+                    user=user or defaults["user"],
+                    password=password or defaults["password"],
+                    sslmode=sslmode or defaults["sslmode"],
+                    url=connection_url,
+                )
+                flash("Database URL saved to appsettings.json. Please restart the app.", "success")
+                return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
             if not all([host, port, name, user]):
                 flash("Host, port, database name, and user are required.", "error")
@@ -224,11 +257,21 @@ def _register_db_setup_blueprint(app):
                 flash(f"Connection failed: {exc}", "error")
                 return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
-            _save_database_settings(app, host, port, name, user, password, sslmode)
+            _save_database_settings(app, host, port, name, user, password, sslmode, url="")
             flash("Database settings saved to appsettings.json. Please restart the app.", "success")
             return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
         return render_template("db_setup.html", form_data=defaults, db_error=app.config.get("DB_ERROR"))
+
+    @setup_bp.route("/setup/restart", methods=["POST"])
+    def setup_restart():
+        # Delay exit slightly so the response can be returned before process shutdown.
+        import os
+        import threading
+
+        threading.Timer(1.0, lambda: os._exit(0)).start()
+        flash("Restart requested. The service should come back in a few seconds.", "success")
+        return redirect(url_for("setup.database_setup"))
 
     app.register_blueprint(setup_bp)
 

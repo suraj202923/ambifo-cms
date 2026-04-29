@@ -2,7 +2,7 @@
 {% block content %}
 <section class="panel narrow">
   <h2>Database Setup</h2>
-  <p class="hint">PostgreSQL connection is not available. Enter database details and save them to appsettings.json.</p>
+  <p class="hint">PostgreSQL connection is not available. Use either a full DATABASE_URL or split database details.</p>
   {% if db_error %}
     <div class="alert error" style="margin-top:0.6rem;">
       Last startup error: {{ db_error }}
@@ -10,17 +10,21 @@
   {% endif %}
 
   <form method="post" class="grid-form" style="margin-top:0.8rem;">
+    <label>DATABASE_URL (recommended for Neon/Render)
+      <input name="connection_url" value="{{ form_data.url }}" placeholder="postgresql://user:pass@host/db?sslmode=require">
+    </label>
+    <p class="hint" style="margin:0;">If DATABASE_URL is provided, it will be used directly and split fields below are optional.</p>
     <label>Host
-      <input name="host" value="{{ form_data.host }}" required>
+      <input name="host" value="{{ form_data.host }}">
     </label>
     <label>Port
-      <input name="port" value="{{ form_data.port }}" required>
+      <input name="port" value="{{ form_data.port }}">
     </label>
     <label>Database Name
-      <input name="name" value="{{ form_data.name }}" required>
+      <input name="name" value="{{ form_data.name }}">
     </label>
     <label>User
-      <input name="user" value="{{ form_data.user }}" required>
+      <input name="user" value="{{ form_data.user }}">
     </label>
     <label>Password
       <input type="password" name="password" value="{{ form_data.password }}">
@@ -33,6 +37,10 @@
       </select>
     </label>
     <button class="btn" type="submit">Test And Save</button>
+  </form>
+
+  <form method="post" action="{{ url_for('setup.setup_restart') }}" style="margin-top:0.8rem;">
+    <button class="btn" type="submit">Restart Application</button>
   </form>
 
   <p class="hint" style="margin-top:0.8rem;">After saving valid credentials, restart the app service.</p>
