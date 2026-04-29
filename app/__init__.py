@@ -190,6 +190,30 @@ def _request_process_restart(delay_seconds=1.0):
     Timer(delay_seconds, lambda: os.kill(target_pid, signal.SIGTERM)).start()
 
 
+def _apply_database_settings_to_runtime(app, connection_url, host, port, name, user, password, sslmode):
+    runtime_url = (connection_url or "").strip() or _build_postgres_url(host, port, name, user, password, sslmode)
+    app.config["SQLALCHEMY_DATABASE_URI"] = runtime_url
+    os.environ["DATABASE_URL"] = runtime_url
+
+    # Reset SQLAlchemy engines so the next access recreates connections using updated config.
+    try:
+        db.session.remove()
+    except Exception:
+        pass
+
+    try:
+        for engine in list(db.engines.values()):
+            engine.dispose()
+        db.engines.clear()
+    except Exception:
+        pass
+
+    db_ready, db_error = _bootstrap_database(app)
+    app.config["DB_READY"] = db_ready
+    app.config["DB_ERROR"] = db_error
+    return db_ready, db_error
+
+
 def _parse_database_url_parts(db_url, defaults):
     parsed = make_url(db_url)
     query = parsed.query or {}
@@ -285,9 +309,23 @@ def _register_db_setup_blueprint(app):
                     sslmode=parsed_parts["sslmode"],
                     url=connection_url,
                 )
-                flash("Database URL saved successfully. Restarting application...", "success")
-                _request_process_restart()
-                return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
+                db_ready, db_error = _apply_database_settings_to_runtime(
+                    app,
+                    connection_url=connection_url,
+                    host=parsed_parts["host"],
+                    port=parsed_parts["port"],
+                    name=parsed_parts["name"],
+                    user=parsed_parts["user"],
+                    password=parsed_parts["password"],
+                    sslmode=parsed_parts["sslmode"],
+                )
+
+                if db_ready:
+                    flash("Database settings saved and connected successfully.", "success")
+                    return redirect(url_for("crm.login"))
+
+                flash(f"Saved, but app bootstrap still failed: {db_error}", "error")
+                return render_template("db_setup.html", form_data=form_data, db_error=db_error)
 
             if not all([host, port, name, user]):
                 flash("Host, port, database name, and user are required.", "error")
@@ -304,9 +342,23 @@ def _register_db_setup_blueprint(app):
                 return render_template("db_setup.html", form_data=form_data, db_error=None)
 
             _save_database_settings(app, host, port, name, user, password, sslmode, url="")
-            flash("Database settings saved successfully. Restarting application...", "success")
-            _request_process_restart()
-            return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
+            db_ready, db_error = _apply_database_settings_to_runtime(
+                app,
+                connection_url="",
+                host=host,
+                port=port,
+                name=name,
+                user=user,
+                password=password,
+                sslmode=sslmode,
+            )
+
+            if db_ready:
+                flash("Database settings saved and connected successfully.", "success")
+                return redirect(url_for("crm.login"))
+
+            flash(f"Saved, but app bootstrap still failed: {db_error}", "error")
+            return render_template("db_setup.html", form_data=form_data, db_error=db_error)
 
         return render_template("db_setup.html", form_data=defaults, db_error=app.config.get("DB_ERROR"))
 
@@ -345,9 +397,19 @@ def create_app():
     app.config["DB_READY"] = db_ready
     app.config["DB_ERROR"] = db_error
 
-    if db_ready:
-        app.register_blueprint(crm_bp)
+    app.register_blueprint(crm_bp)
     _register_db_setup_blueprint(app)
+
+    @app.before_request
+    def require_database_setup():
+        if app.config.get("DB_READY"):
+            return None
+
+        endpoint = request.endpoint or ""
+        if endpoint == "static" or endpoint.startswith("setup."):
+            return None
+
+        return redirect(url_for("setup.database_setup"))
 
     @app.cli.command("init-db")
     @with_appcontext
