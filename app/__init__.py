@@ -222,45 +222,188 @@ def _parse_database_url_parts(db_url, defaults):
 
 def _seed_welcome_template():
     from app.models import EmailTemplate
-    WELCOME_SUBJECT = "Introduction – Ambifo Technology Pvt Ltd | Cloud & AI Solutions"
+    WELCOME_SUBJECT = "🚀 Introduction – Ambifo Technology Pvt Ltd | Cloud & AI Solutions"
     WELCOME_BODY = """\
-<p>Dear {{customer_name}},</p>
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Introduction – Ambifo Technology</title></head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:'Segoe UI',Arial,sans-serif;">
 
-<p>Hope this message finds you well!</p>
+<!-- Wrapper -->
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f4f8;padding:30px 0;">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
 
-<p>I'm reaching out from <strong>Ambifo Technology Pvt Ltd</strong> — a cloud-native company and
-Premier Consulting Partner with both <strong>AWS and Microsoft Azure</strong>. We bring deep expertise
-across AI/ML, cloud security, data analytics, and digital transformation initiatives.</p>
+    <!-- ===== HEADER / LOGO BANNER ===== -->
+    <tr>
+        <td style="background:linear-gradient(135deg,#0a1f5c 0%,#1565c0 55%,#00b4d8 100%);padding:36px 40px 28px;text-align:center;">
+            <div style="display:inline-block;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.3);border-radius:12px;padding:10px 28px;margin-bottom:14px;">
+                <span style="font-size:32px;font-weight:900;letter-spacing:4px;color:#ffffff;text-transform:uppercase;font-family:'Segoe UI',Arial,sans-serif;">AMBIFO</span>
+                <span style="display:block;font-size:11px;letter-spacing:2px;color:#90caf9;margin-top:2px;text-transform:uppercase;">Technology Pvt Ltd</span>
+            </div>
+            <div style="margin-top:8px;">
+                <span style="display:inline-block;background:#ffd600;color:#0a1f5c;font-size:11px;font-weight:700;border-radius:20px;padding:4px 14px;letter-spacing:1px;text-transform:uppercase;">⭐ Premier AWS &amp; Azure Consulting Partner</span>
+            </div>
+        </td>
+    </tr>
 
-<p>Please find attached our company profile and a snapshot of our core offerings for your reference:</p>
+    <!-- ===== GREETING ===== -->
+    <tr>
+        <td style="padding:36px 40px 0;">
+            <p style="font-size:17px;color:#1a237e;font-weight:700;margin:0 0 8px;">👋 Dear {{customer_name}},</p>
+            <p style="font-size:15px;color:#37474f;line-height:1.7;margin:0 0 18px;">Hope this message finds you well!</p>
+            <div style="background:#e3f2fd;border-left:5px solid #1565c0;border-radius:0 10px 10px 0;padding:16px 20px;margin-bottom:20px;">
+                <p style="margin:0;font-size:15px;color:#0d47a1;line-height:1.7;">
+                    I'm reaching out from <strong>Ambifo Technology Pvt Ltd</strong> — a <span style="background:#fff9c4;padding:1px 6px;border-radius:4px;">☁️ cloud-native company</span> and
+                    <span style="background:#fff9c4;padding:1px 6px;border-radius:4px;">🏆 Premier Consulting Partner</span> with both
+                    <strong>AWS</strong> and <strong>Microsoft Azure</strong>. We bring deep expertise across
+                    AI/ML, cloud security, data analytics, and digital transformation initiatives.
+                </p>
+            </div>
+        </td>
+    </tr>
 
-<ul>
-  <li><strong>Cloud Solutions</strong> – End-to-end consulting, migration, cost optimization &amp; managed services across AWS &amp; Azure</li>
-  <li><strong>Generative AI &amp; ML</strong> – Tailored use cases, PoCs, and advisory via our GenAI Tech Studio</li>
-  <li><strong>Data Analytics &amp; BI</strong> – Real-time insights built on AWS and Snowflake</li>
-  <li><strong>DevOps &amp; Agile Transformation</strong> – CI/CD, DevSecOps, and full SDLC automation</li>
-  <li><strong>Application Modernization</strong> – Scalable, cloud-native infrastructure with minimal disruption</li>
-  <li><strong>Cloud Security</strong> – IAM, governance, compliance, and proactive threat management</li>
-  <li><strong>ISV Partnerships</strong> – Expertise with CrowdStrike, Zscaler, Snowflake, Veeam, and more</li>
-</ul>
+    <!-- ===== SERVICES HEADING ===== -->
+    <tr>
+        <td style="padding:0 40px 16px;">
+            <p style="font-size:15px;color:#37474f;line-height:1.7;margin:0 0 18px;">
+                Please find attached our company profile and a snapshot of our core offerings for your reference:
+            </p>
+            <p style="font-size:16px;font-weight:800;color:#0a1f5c;margin:0 0 14px;text-transform:uppercase;letter-spacing:1px;">✨ Our Core Services</p>
+        </td>
+    </tr>
 
-<p>You'll also find our corporate flyer attached for quick reference. For additional insights, feel free
-to explore our GenAI use cases and success stories on our Tech Studio.</p>
+    <!-- ===== SERVICE CARDS ===== -->
+    <tr>
+        <td style="padding:0 30px 20px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
 
-<p>I understand your current setup is running on <strong>Azure Cloud Services</strong>, and you're
-exploring potential Cloud Solutions or Managed Services on Azure. We would love to discuss how
-Ambifo can add value to your journey.</p>
+                <!-- Row 1 -->
+                <tr>
+                    <td width="50%" style="padding:6px;">
+                        <div style="background:#e8f5e9;border-radius:12px;padding:16px 18px;border-top:4px solid #43a047;">
+                            <div style="font-size:22px;margin-bottom:6px;">☁️</div>
+                            <div style="font-size:13px;font-weight:800;color:#1b5e20;margin-bottom:4px;">Cloud Solutions</div>
+                            <div style="font-size:12px;color:#388e3c;line-height:1.5;">End-to-end consulting, migration, cost optimization &amp; managed services across AWS &amp; Azure</div>
+                        </div>
+                    </td>
+                    <td width="50%" style="padding:6px;">
+                        <div style="background:#f3e5f5;border-radius:12px;padding:16px 18px;border-top:4px solid #8e24aa;">
+                            <div style="font-size:22px;margin-bottom:6px;">🤖</div>
+                            <div style="font-size:13px;font-weight:800;color:#4a148c;margin-bottom:4px;">Generative AI &amp; ML</div>
+                            <div style="font-size:12px;color:#7b1fa2;line-height:1.5;">Tailored use cases, PoCs &amp; advisory via our <strong>GenAI Tech Studio</strong></div>
+                        </div>
+                    </td>
+                </tr>
 
-<p>Kindly confirm your availability and share your office address so that we can plan our visit accordingly.</p>
+                <!-- Row 2 -->
+                <tr>
+                    <td width="50%" style="padding:6px;">
+                        <div style="background:#e3f2fd;border-radius:12px;padding:16px 18px;border-top:4px solid #1565c0;">
+                            <div style="font-size:22px;margin-bottom:6px;">📊</div>
+                            <div style="font-size:13px;font-weight:800;color:#0d47a1;margin-bottom:4px;">Data Analytics &amp; BI</div>
+                            <div style="font-size:12px;color:#1565c0;line-height:1.5;">Real-time insights built on AWS and Snowflake</div>
+                        </div>
+                    </td>
+                    <td width="50%" style="padding:6px;">
+                        <div style="background:#fff3e0;border-radius:12px;padding:16px 18px;border-top:4px solid #ef6c00;">
+                            <div style="font-size:22px;margin-bottom:6px;">⚙️</div>
+                            <div style="font-size:13px;font-weight:800;color:#bf360c;margin-bottom:4px;">DevOps &amp; Agile</div>
+                            <div style="font-size:12px;color:#e65100;line-height:1.5;">CI/CD, DevSecOps, and full SDLC automation</div>
+                        </div>
+                    </td>
+                </tr>
 
-<p>Looking forward to meeting you in person and discussing how we can support further.</p>
+                <!-- Row 3 -->
+                <tr>
+                    <td width="50%" style="padding:6px;">
+                        <div style="background:#fce4ec;border-radius:12px;padding:16px 18px;border-top:4px solid #c62828;">
+                            <div style="font-size:22px;margin-bottom:6px;">🔒</div>
+                            <div style="font-size:13px;font-weight:800;color:#880e4f;margin-bottom:4px;">Cloud Security</div>
+                            <div style="font-size:12px;color:#c62828;line-height:1.5;">IAM, governance, compliance &amp; proactive threat management</div>
+                        </div>
+                    </td>
+                    <td width="50%" style="padding:6px;">
+                        <div style="background:#e0f7fa;border-radius:12px;padding:16px 18px;border-top:4px solid #00838f;">
+                            <div style="font-size:22px;margin-bottom:6px;">🚀</div>
+                            <div style="font-size:13px;font-weight:800;color:#006064;margin-bottom:4px;">App Modernization</div>
+                            <div style="font-size:12px;color:#00838f;line-height:1.5;">Scalable, cloud-native infrastructure with minimal disruption</div>
+                        </div>
+                    </td>
+                </tr>
 
-<p>Warm regards,<br>
-<strong>Ambifo Technology Pvt Ltd</strong><br>
-Premier AWS &amp; Azure Consulting Partner</p>
+                <!-- Row 4 – full width -->
+                <tr>
+                    <td colspan="2" style="padding:6px;">
+                        <div style="background:linear-gradient(90deg,#1a237e,#283593);border-radius:12px;padding:16px 18px;">
+                            <div style="font-size:22px;margin-bottom:6px;">🤝</div>
+                            <div style="font-size:13px;font-weight:800;color:#ffd600;margin-bottom:6px;">ISV Partnerships</div>
+                            <div style="font-size:12px;color:#bbdefb;line-height:1.6;">
+                                Strategic alliances with world-class technology vendors:&nbsp;
+                                <span style="background:#ffd600;color:#0a1f5c;border-radius:4px;padding:2px 8px;font-weight:700;margin:2px;display:inline-block;">CrowdStrike</span>
+                                <span style="background:#ffd600;color:#0a1f5c;border-radius:4px;padding:2px 8px;font-weight:700;margin:2px;display:inline-block;">Zscaler</span>
+                                <span style="background:#ffd600;color:#0a1f5c;border-radius:4px;padding:2px 8px;font-weight:700;margin:2px;display:inline-block;">Snowflake</span>
+                                <span style="background:#ffd600;color:#0a1f5c;border-radius:4px;padding:2px 8px;font-weight:700;margin:2px;display:inline-block;">Veeam</span>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+
+            </table>
+        </td>
+    </tr>
+
+    <!-- ===== WHY US HIGHLIGHT ===== -->
+    <tr>
+        <td style="padding:0 40px 24px;">
+            <div style="background:#fffde7;border:1px solid #fdd835;border-radius:12px;padding:18px 22px;">
+                <p style="margin:0 0 8px;font-size:14px;font-weight:800;color:#f57f17;">💡 Why Ambifo for Azure Cloud?</p>
+                <p style="margin:0;font-size:14px;color:#37474f;line-height:1.7;">
+                    I understand your current setup is running on
+                    <span style="background:#fff9c4;padding:1px 6px;border-radius:4px;font-weight:700;">Azure Cloud Services</span>
+                    and you're exploring potential <strong>Cloud Solutions or Managed Services on Azure</strong>.
+                    We would love to discuss how Ambifo can add value to your journey. 🌟
+                </p>
+            </div>
+        </td>
+    </tr>
+
+    <!-- ===== CTA ===== -->
+    <tr>
+        <td style="padding:0 40px 32px;text-align:center;">
+            <div style="background:#f9fbe7;border:1px solid #c5e1a5;border-radius:12px;padding:20px 24px;">
+                <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#33691e;">📅 Let's Connect!</p>
+                <p style="margin:0 0 16px;font-size:14px;color:#558b2f;line-height:1.6;">
+                    Kindly <strong>confirm your availability</strong> and share your office address so we can plan a visit. Looking forward to meeting you in person! 🤝
+                </p>
+                <a href="mailto:sales@ambifo.com" style="display:inline-block;background:linear-gradient(135deg,#0a1f5c,#1565c0);color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:25px;padding:12px 32px;letter-spacing:0.5px;">📧 Schedule a Meeting</a>
+            </div>
+        </td>
+    </tr>
+
+    <!-- ===== FOOTER ===== -->
+    <tr>
+        <td style="background:linear-gradient(135deg,#0a1f5c,#1565c0);padding:28px 40px;text-align:center;">
+            <p style="margin:0 0 6px;font-size:16px;font-weight:900;color:#ffffff;letter-spacing:3px;">AMBIFO</p>
+            <p style="margin:0 0 10px;font-size:12px;color:#90caf9;">Technology Pvt Ltd</p>
+            <p style="margin:0;font-size:11px;color:#64b5f6;">🏆 Premier AWS &amp; Azure Consulting Partner &nbsp;|&nbsp; ☁️ Cloud · AI · Security · Data</p>
+        </td>
+    </tr>
+
+</table>
+</td></tr>
+</table>
+
+</body>
+</html>
 """
     existing = EmailTemplate.query.filter_by(name="Welcome – Ambifo Introduction").first()
-    if not existing:
+    if existing:
+        existing.subject_template = WELCOME_SUBJECT
+        existing.body_template = WELCOME_BODY
+        db.session.commit()
+    else:
         db.session.add(EmailTemplate(
             name="Welcome – Ambifo Introduction",
             subject_template=WELCOME_SUBJECT,
