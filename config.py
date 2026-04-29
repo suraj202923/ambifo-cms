@@ -45,17 +45,31 @@ def _get_setting(env_key, json_path, default=None):
     return json_value
 
 
+def _get_database_setting(env_key, json_path, default=None):
+    # Database setup flow writes to appsettings.json at runtime; prioritize that value
+    # so saved setup credentials are applied after restart.
+    json_value = _get_json_setting(json_path, None)
+    if json_value not in (None, ""):
+        return json_value
+
+    env_value = os.getenv(env_key)
+    if env_value not in (None, ""):
+        return env_value
+
+    return default
+
+
 def _build_database_url():
-    explicit_url = str(_get_setting("DATABASE_URL", "Database.Url", "")).strip()
+    explicit_url = str(_get_database_setting("DATABASE_URL", "Database.Url", "")).strip()
     if explicit_url:
         return explicit_url
 
-    db_host = str(_get_setting("POSTGRES_HOST", "Database.Host", "localhost"))
-    db_port = str(_get_setting("POSTGRES_PORT", "Database.Port", "5432"))
-    db_name = str(_get_setting("POSTGRES_DB", "Database.Name", "ambifo_crm"))
-    db_user = str(_get_setting("POSTGRES_USER", "Database.User", "postgres"))
-    db_password = quote_plus(str(_get_setting("POSTGRES_PASSWORD", "Database.Password", "postgres")))
-    ssl_mode = str(_get_setting("POSTGRES_SSLMODE", "Database.SSLMode", "prefer"))
+    db_host = str(_get_database_setting("POSTGRES_HOST", "Database.Host", "localhost"))
+    db_port = str(_get_database_setting("POSTGRES_PORT", "Database.Port", "5432"))
+    db_name = str(_get_database_setting("POSTGRES_DB", "Database.Name", "ambifo_crm"))
+    db_user = str(_get_database_setting("POSTGRES_USER", "Database.User", "postgres"))
+    db_password = quote_plus(str(_get_database_setting("POSTGRES_PASSWORD", "Database.Password", "postgres")))
+    ssl_mode = str(_get_database_setting("POSTGRES_SSLMODE", "Database.SSLMode", "prefer"))
 
     return (
         f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
