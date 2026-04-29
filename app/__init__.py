@@ -220,6 +220,55 @@ def _parse_database_url_parts(db_url, defaults):
     }
 
 
+def _seed_welcome_template():
+    from app.models import EmailTemplate
+    WELCOME_SUBJECT = "Introduction – Ambifo Technology Pvt Ltd | Cloud & AI Solutions"
+    WELCOME_BODY = """\
+<p>Dear {{customer_name}},</p>
+
+<p>Hope this message finds you well!</p>
+
+<p>I'm reaching out from <strong>Ambifo Technology Pvt Ltd</strong> — a cloud-native company and
+Premier Consulting Partner with both <strong>AWS and Microsoft Azure</strong>. We bring deep expertise
+across AI/ML, cloud security, data analytics, and digital transformation initiatives.</p>
+
+<p>Please find attached our company profile and a snapshot of our core offerings for your reference:</p>
+
+<ul>
+  <li><strong>Cloud Solutions</strong> – End-to-end consulting, migration, cost optimization &amp; managed services across AWS &amp; Azure</li>
+  <li><strong>Generative AI &amp; ML</strong> – Tailored use cases, PoCs, and advisory via our GenAI Tech Studio</li>
+  <li><strong>Data Analytics &amp; BI</strong> – Real-time insights built on AWS and Snowflake</li>
+  <li><strong>DevOps &amp; Agile Transformation</strong> – CI/CD, DevSecOps, and full SDLC automation</li>
+  <li><strong>Application Modernization</strong> – Scalable, cloud-native infrastructure with minimal disruption</li>
+  <li><strong>Cloud Security</strong> – IAM, governance, compliance, and proactive threat management</li>
+  <li><strong>ISV Partnerships</strong> – Expertise with CrowdStrike, Zscaler, Snowflake, Veeam, and more</li>
+</ul>
+
+<p>You'll also find our corporate flyer attached for quick reference. For additional insights, feel free
+to explore our GenAI use cases and success stories on our Tech Studio.</p>
+
+<p>I understand your current setup is running on <strong>Azure Cloud Services</strong>, and you're
+exploring potential Cloud Solutions or Managed Services on Azure. We would love to discuss how
+Ambifo can add value to your journey.</p>
+
+<p>Kindly confirm your availability and share your office address so that we can plan our visit accordingly.</p>
+
+<p>Looking forward to meeting you in person and discussing how we can support further.</p>
+
+<p>Warm regards,<br>
+<strong>Ambifo Technology Pvt Ltd</strong><br>
+Premier AWS &amp; Azure Consulting Partner</p>
+"""
+    existing = EmailTemplate.query.filter_by(name="Welcome – Ambifo Introduction").first()
+    if not existing:
+        db.session.add(EmailTemplate(
+            name="Welcome – Ambifo Introduction",
+            subject_template=WELCOME_SUBJECT,
+            body_template=WELCOME_BODY,
+        ))
+        db.session.commit()
+
+
 def _bootstrap_database(app):
     with app.app_context():
         try:
@@ -227,6 +276,7 @@ def _bootstrap_database(app):
             db.create_all()
             _ensure_runtime_schema_updates()
             _ensure_default_admin(app)
+            _seed_welcome_template()
             db.session.remove()
             return True, None
         except Exception as exc:
@@ -410,6 +460,7 @@ def create_app():
         db.create_all()
         _ensure_runtime_schema_updates()
         _ensure_default_admin(app)
+        _seed_welcome_template()
         print("Database tables created.")
 
     @app.cli.command("import-master-tracker")
