@@ -1,9 +1,7 @@
 import csv
 import json
 import os
-import signal
 from pathlib import Path
-from threading import Timer
 from urllib.parse import quote_plus
 
 from flask import Blueprint, Flask, flash, redirect, render_template, request, url_for
@@ -183,30 +181,21 @@ def _test_database_url_connection(db_url):
         engine.dispose()
 
 
-def _request_process_restart(delay_seconds=1.0):
-    """Restart the full service process (Gunicorn master on Render)."""
-    master_pid = os.getppid()
-    target_pid = master_pid if master_pid and master_pid > 1 else os.getpid()
-    Timer(delay_seconds, lambda: os.kill(target_pid, signal.SIGTERM)).start()
-
-
 def _apply_database_settings_to_runtime(app, connection_url, host, port, name, user, password, sslmode):
     runtime_url = (connection_url or "").strip() or _build_postgres_url(host, port, name, user, password, sslmode)
     app.config["SQLALCHEMY_DATABASE_URI"] = runtime_url
     os.environ["DATABASE_URL"] = runtime_url
 
-    # Reset SQLAlchemy engines so the next access recreates connections using updated config.
-    try:
-        db.session.remove()
-    except Exception:
-        pass
+    # Rebind Flask-SQLAlchemy to the new URL without restarting the service.
+    ext = app.extensions.get("sqlalchemy")
+    if ext:
+        existing_engines = ext._app_engines.get(app, {})
+        current_engine = existing_engines.get(None)
+        if current_engine is not None:
+            current_engine.dispose()
+        ext._app_engines[app] = {None: create_engine(runtime_url)}
 
-    try:
-        for engine in list(db.engines.values()):
-            engine.dispose()
-        db.engines.clear()
-    except Exception:
-        pass
+    db.session.remove()
 
     db_ready, db_error = _bootstrap_database(app)
     app.config["DB_READY"] = db_ready
@@ -361,12 +350,6 @@ def _register_db_setup_blueprint(app):
             return render_template("db_setup.html", form_data=form_data, db_error=db_error)
 
         return render_template("db_setup.html", form_data=defaults, db_error=app.config.get("DB_ERROR"))
-
-    @setup_bp.route("/setup/restart", methods=["POST"])
-    def setup_restart():
-        _request_process_restart()
-        flash("Restart requested. The service should come back in a few seconds.", "success")
-        return redirect(url_for("setup.database_setup"))
 
     app.register_blueprint(setup_bp)
 
