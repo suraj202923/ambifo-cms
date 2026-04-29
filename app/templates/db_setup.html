@@ -11,26 +11,29 @@
 
   <form method="post" class="grid-form" style="margin-top:0.8rem;">
     <label>DATABASE_URL (recommended for Neon/Render)
-      <input name="connection_url" value="{{ form_data.url }}" placeholder="postgresql://user:pass@host/db?sslmode=require">
+      <input id="connection_url" name="connection_url" value="{{ form_data.url }}" placeholder="postgresql://user:pass@host/db?sslmode=require">
     </label>
+    <div style="margin-top:-0.2rem; margin-bottom:0.3rem;">
+      <button class="btn" type="button" id="populate_from_url">Populate Fields From URL</button>
+    </div>
     <p class="hint" style="margin:0;">If DATABASE_URL is provided, it will be used directly and split fields below are optional.</p>
     <label>Host
-      <input name="host" value="{{ form_data.host }}">
+      <input id="host" name="host" value="{{ form_data.host }}">
     </label>
     <label>Port
-      <input name="port" value="{{ form_data.port }}">
+      <input id="port" name="port" value="{{ form_data.port }}">
     </label>
     <label>Database Name
-      <input name="name" value="{{ form_data.name }}">
+      <input id="name" name="name" value="{{ form_data.name }}">
     </label>
     <label>User
-      <input name="user" value="{{ form_data.user }}">
+      <input id="user" name="user" value="{{ form_data.user }}">
     </label>
     <label>Password
-      <input type="password" name="password" value="{{ form_data.password }}">
+      <input id="password" type="password" name="password" value="{{ form_data.password }}">
     </label>
     <label>SSL Mode
-      <select name="sslmode">
+      <select id="sslmode" name="sslmode">
         {% for m in ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'] %}
           <option value="{{ m }}" {% if form_data.sslmode == m %}selected{% endif %}>{{ m }}</option>
         {% endfor %}
@@ -43,4 +46,58 @@
   </form>
   <p class="hint" style="margin-top:0.8rem;">Save Connection will restart the app automatically.</p>
 </section>
+
+<script>
+  (function () {
+    const connectionUrlInput = document.getElementById('connection_url');
+    const populateButton = document.getElementById('populate_from_url');
+    const hostInput = document.getElementById('host');
+    const portInput = document.getElementById('port');
+    const nameInput = document.getElementById('name');
+    const userInput = document.getElementById('user');
+    const passwordInput = document.getElementById('password');
+    const sslModeSelect = document.getElementById('sslmode');
+
+    function parseAndPopulate() {
+      const raw = (connectionUrlInput.value || '').trim();
+      if (!raw) {
+        return;
+      }
+
+      let parsed;
+      try {
+        parsed = new URL(raw);
+      } catch (_err) {
+        return;
+      }
+
+      if (parsed.hostname) {
+        hostInput.value = parsed.hostname;
+      }
+      if (parsed.port) {
+        portInput.value = parsed.port;
+      }
+
+      const dbName = (parsed.pathname || '').replace(/^\//, '');
+      if (dbName) {
+        nameInput.value = decodeURIComponent(dbName);
+      }
+
+      if (parsed.username) {
+        userInput.value = decodeURIComponent(parsed.username);
+      }
+      if (parsed.password) {
+        passwordInput.value = decodeURIComponent(parsed.password);
+      }
+
+      const sslMode = parsed.searchParams.get('sslmode');
+      if (sslMode && Array.from(sslModeSelect.options).some((o) => o.value === sslMode)) {
+        sslModeSelect.value = sslMode;
+      }
+    }
+
+    populateButton.addEventListener('click', parseAndPopulate);
+    connectionUrlInput.addEventListener('blur', parseAndPopulate);
+  })();
+</script>
 {% endblock %}
