@@ -5,6 +5,7 @@ import io
 import os
 from pathlib import Path
 import secrets
+import signal
 import threading
 
 from flask import (
@@ -46,7 +47,6 @@ from app.services.email_service import EmailService
 from app.services.macro_service import build_macro_values, render_macros
 from app.services.storage_service import StorageService
 from app.services.teams_service import TeamsService
-from app import _request_process_restart
 
 
 crm_bp = Blueprint("crm", __name__)
@@ -191,6 +191,13 @@ def _generate_access_key(length=8):
 
 def _is_gathering_request_expired(request_record):
     return bool(request_record.expires_at and datetime.utcnow() > request_record.expires_at)
+
+
+def _request_process_restart(delay_seconds=1.0):
+    """Restart the full service process (Gunicorn master on Render)."""
+    master_pid = os.getppid()
+    target_pid = master_pid if master_pid and master_pid > 1 else os.getpid()
+    threading.Timer(delay_seconds, lambda: os.kill(target_pid, signal.SIGTERM)).start()
 
 
 @crm_bp.before_app_request
