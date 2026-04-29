@@ -6,6 +6,7 @@ from urllib.parse import quote_plus
 from flask import Blueprint, Flask, flash, redirect, render_template, request, url_for
 from flask.cli import with_appcontext
 from flask_login import LoginManager
+from sqlalchemy.engine import make_url
 from sqlalchemy import create_engine, inspect, text
 from werkzeug.utils import secure_filename
 
@@ -179,6 +180,19 @@ def _test_database_url_connection(db_url):
         engine.dispose()
 
 
+def _parse_database_url_parts(db_url, defaults):
+    parsed = make_url(db_url)
+    query = parsed.query or {}
+    return {
+        "host": parsed.host or defaults["host"],
+        "port": str(parsed.port or defaults["port"]),
+        "name": (parsed.database or defaults["name"]),
+        "user": (parsed.username or defaults["user"]),
+        "password": (parsed.password or defaults["password"]),
+        "sslmode": str(query.get("sslmode") or defaults["sslmode"]),
+    }
+
+
 def _bootstrap_database(app):
     with app.app_context():
         try:
@@ -239,14 +253,26 @@ def _register_db_setup_blueprint(app):
                     flash("Connection successful.", "success")
                     return render_template("db_setup.html", form_data=form_data, db_error=None)
 
+                try:
+                    parsed_parts = _parse_database_url_parts(connection_url, defaults)
+                except Exception:
+                    parsed_parts = {
+                        "host": host or defaults["host"],
+                        "port": port or defaults["port"],
+                        "name": name or defaults["name"],
+                        "user": user or defaults["user"],
+                        "password": password or defaults["password"],
+                        "sslmode": sslmode or defaults["sslmode"],
+                    }
+
                 _save_database_settings(
                     app,
-                    host=host or defaults["host"],
-                    port=port or defaults["port"],
-                    name=name or defaults["name"],
-                    user=user or defaults["user"],
-                    password=password or defaults["password"],
-                    sslmode=sslmode or defaults["sslmode"],
+                    host=parsed_parts["host"],
+                    port=parsed_parts["port"],
+                    name=parsed_parts["name"],
+                    user=parsed_parts["user"],
+                    password=parsed_parts["password"],
+                    sslmode=parsed_parts["sslmode"],
                     url=connection_url,
                 )
                 # Restart automatically so updated settings are picked up immediately.
