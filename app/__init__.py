@@ -21,7 +21,11 @@ login_manager = LoginManager()
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    try:
+        return User.query.get(int(user_id))
+    except Exception:
+        # DB not ready (e.g. no connection configured yet on first deploy).
+        return None
 
 
 def _ensure_default_admin(app):

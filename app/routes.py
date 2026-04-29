@@ -5,6 +5,8 @@ import io
 import os
 from pathlib import Path
 import secrets
+import signal
+import threading
 
 from flask import (
     Blueprint,
@@ -191,6 +193,13 @@ def _is_gathering_request_expired(request_record):
     return bool(request_record.expires_at and datetime.utcnow() > request_record.expires_at)
 
 
+def _request_process_restart(delay_seconds=1.0):
+    """Restart the full service process (Gunicorn master on Render)."""
+    master_pid = os.getppid()
+    target_pid = master_pid if master_pid and master_pid > 1 else os.getpid()
+    threading.Timer(delay_seconds, lambda: os.kill(target_pid, signal.SIGTERM)).start()
+
+
 @crm_bp.before_app_request
 def require_login_for_crm_routes():
     endpoint = request.endpoint or ""
@@ -207,6 +216,10 @@ def require_login_for_crm_routes():
     }
 
     if endpoint in allowed_endpoints:
+        return
+
+    # If DB is not ready, let the app-level before_request gate handle the redirect.
+    if not current_app.config.get("DB_READY"):
         return
 
     if endpoint.startswith("crm.") and not current_user.is_authenticated:
@@ -1863,7 +1876,8 @@ def configuration():
                 flash("Admin user added.", "success")
 
         elif action == "restart_app":
-            flash("Restart is disabled. Save actions now apply settings without restarting the service.", "error")
+            _request_process_restart()
+            flash("Restart requested. The service should come back in a few seconds.", "success")
 
         return redirect(url_for("crm.configuration"))
 
