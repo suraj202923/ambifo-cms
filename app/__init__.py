@@ -209,6 +209,7 @@ def _register_db_setup_blueprint(app):
 
         defaults = _read_database_defaults(app)
         if request.method == "POST":
+            action = (request.form.get("action") or "save").strip().lower()
             connection_url = (request.form.get("connection_url") or "").strip()
             host = (request.form.get("host") or "").strip()
             port = (request.form.get("port") or "").strip()
@@ -234,6 +235,10 @@ def _register_db_setup_blueprint(app):
                     flash(f"Connection failed: {exc}", "error")
                     return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
+                if action == "test":
+                    flash("Connection successful.", "success")
+                    return render_template("db_setup.html", form_data=form_data, db_error=None)
+
                 _save_database_settings(
                     app,
                     host=host or defaults["host"],
@@ -244,7 +249,13 @@ def _register_db_setup_blueprint(app):
                     sslmode=sslmode or defaults["sslmode"],
                     url=connection_url,
                 )
-                flash("Database URL saved to appsettings.json. Please restart the app.", "success")
+                # Restart automatically so updated settings are picked up immediately.
+                import os
+
+                from threading import Timer
+
+                flash("Database URL saved successfully. Restarting application...", "success")
+                Timer(1.0, lambda: os._exit(0)).start()
                 return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
             if not all([host, port, name, user]):
@@ -257,8 +268,18 @@ def _register_db_setup_blueprint(app):
                 flash(f"Connection failed: {exc}", "error")
                 return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
+            if action == "test":
+                flash("Connection successful.", "success")
+                return render_template("db_setup.html", form_data=form_data, db_error=None)
+
             _save_database_settings(app, host, port, name, user, password, sslmode, url="")
-            flash("Database settings saved to appsettings.json. Please restart the app.", "success")
+            # Restart automatically so updated settings are picked up immediately.
+            import os
+
+            from threading import Timer
+
+            flash("Database settings saved successfully. Restarting application...", "success")
+            Timer(1.0, lambda: os._exit(0)).start()
             return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
 
         return render_template("db_setup.html", form_data=defaults, db_error=app.config.get("DB_ERROR"))

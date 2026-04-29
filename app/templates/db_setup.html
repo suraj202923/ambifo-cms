@@ -2,7 +2,7 @@
 {% block content %}
 <section class="panel narrow">
   <h2>Database Setup</h2>
-  <p class="hint">PostgreSQL connection is not available. Use either a full DATABASE_URL or split database details.</p>
+  <p class="hint">PostgreSQL connection is not available. Use Test Connection first, then Save Connection.</p>
   {% if db_error %}
     <div class="alert error" style="margin-top:0.6rem;">
       Last startup error: {{ db_error }}
@@ -36,13 +36,11 @@
         {% endfor %}
       </select>
     </label>
-    <button class="btn" type="submit">Test And Save</button>
+    <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+      <button class="btn" type="submit" name="action" value="test">Test Connection</button>
+      <button class="btn" type="submit" name="action" value="save">Save Connection</button>
+    </div>
   </form>
-
-  <form method="post" action="{{ url_for('setup.setup_restart') }}" style="margin-top:0.8rem;">
-    <button class="btn" type="submit">Restart Application</button>
-  </form>
-
-  <p class="hint" style="margin-top:0.8rem;">After saving valid credentials, restart the app service.</p>
+  <p class="hint" style="margin-top:0.8rem;">Save Connection will restart the app automatically.</p>
 </section>
 {% endblock %}
