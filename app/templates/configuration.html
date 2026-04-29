@@ -139,14 +139,6 @@
         </div>
       </section>
 
-      <section class="panel config-card mobile-collapsible" id="restart-config">
-        <h3>Restart Application</h3>
-        <p class="hint">Use this after changing startup-level settings (for example database connection in appsettings.json).</p>
-        <form method="post" onsubmit="return confirm('Restart application now? Current active requests may be interrupted.');">
-          <input type="hidden" name="action" value="restart_app">
-          <button class="btn btn-danger" type="submit">Restart App</button>
-        </form>
-      </section>
     </div>
 
     <aside class="panel config-right">
@@ -158,7 +150,6 @@
         <a href="#segment-config">Segment</a>
         <a href="#update-tags-config">Update Tags</a>
         <a href="#admin-users-config">Admin Users</a>
-        <a href="#restart-config">Restart Application</a>
       </div>
     </aside>
   </div>
