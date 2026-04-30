@@ -95,21 +95,25 @@
       ansible.builtin.command:
         cmd: "{{ python_bin }} -m venv {{ venv_dir }}"
         creates: "{{ venv_dir }}/bin/activate"
-      become_user: "{{ app_user }}"
 
     - name: Upgrade pip
       ansible.builtin.pip:
         name: pip
         state: latest
         virtualenv: "{{ venv_dir }}"
-      become_user: "{{ app_user }}"
 
     - name: Install Python requirements
       ansible.builtin.pip:
         requirements: "{{ app_dir }}/requirements.txt"
         virtualenv: "{{ venv_dir }}"
-      become_user: "{{ app_user }}"
       notify: Restart ambifo
+
+    - name: Ensure app ownership after venv and pip install
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        recurse: true
 
     # ── 5. PostgreSQL setup ─────────────────────────────────────
     - name: Ensure PostgreSQL is started
