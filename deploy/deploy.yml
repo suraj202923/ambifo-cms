@@ -64,7 +64,6 @@
         version: "{{ git_branch | default('main') }}"
         force: true
         update: true
-      become_user: "{{ app_user }}"
       notify: Restart ambifo
 
     - name: Set app directory ownership after clone
@@ -122,29 +121,41 @@
         state: started
         enabled: true
 
-    - name: Create PostgreSQL database
-      ansible.builtin.postgresql_db:
-        name: "{{ db_name }}"
-        state: present
-      become_user: postgres
+    - name: Create PostgreSQL role if missing
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -tAc "
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ db_user }}') THEN
+            CREATE ROLE {{ db_user }} LOGIN PASSWORD '{{ db_password }}';
+          END IF;
+        END
+        $$;"
+      changed_when: false
 
-    - name: Create PostgreSQL user
-      ansible.builtin.postgresql_user:
-        name: "{{ db_user }}"
-        password: "{{ db_password }}"
-        priv: "ALL"
-        db: "{{ db_name }}"
-        state: present
-      become_user: postgres
+    - name: Ensure PostgreSQL database exists
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -tAc "
+        SELECT 1 FROM pg_database WHERE datname='{{ db_name }}'"
+      register: db_exists_check
+      changed_when: false
+
+    - name: Create PostgreSQL database if missing
+      ansible.builtin.command: >
+        runuser -u postgres -- createdb {{ db_name }}
+      when: db_exists_check.stdout.strip() != "1"
+
+    - name: Ensure PostgreSQL role password is updated
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -d postgres -c "
+        ALTER ROLE {{ db_user }} WITH LOGIN PASSWORD '{{ db_password }}';"
+      changed_when: false
 
     - name: Grant all privileges on database to user
-      ansible.builtin.postgresql_privs:
-        database: "{{ db_name }}"
-        role: "{{ db_user }}"
-        type: database
-        privs: ALL
-        state: present
-      become_user: postgres
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -d postgres -c "
+        GRANT ALL PRIVILEGES ON DATABASE {{ db_name }} TO {{ db_user }};"
+      changed_when: false
 
     # ── 6. App configuration (appsettings.json) ─────────────────
     - name: Write appsettings.json
