@@ -1,0 +1,218 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ambifo CMS — Full Cleanup / Uninstall Playbook             ║
+# ║  WARNING: This removes EVERYTHING installed by deploy.yml   ║
+# ║  Run: ansible-playbook -i hosts.ini cleanup.yml             ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: Uninstall Ambifo CMS from Ubuntu
+  hosts: ambifo_server
+  become: true
+
+  vars:
+    app_user: ambifo
+    app_dir: /opt/ambifocms
+    domain_name: crm.ambifo.com
+
+  tasks:
+
+    # ── 1. Stop and remove systemd service ─────────────────────
+    - name: Stop ambifo service
+      ansible.builtin.systemd:
+        name: ambifo
+        state: stopped
+      ignore_errors: true
+
+    - name: Disable ambifo service
+      ansible.builtin.systemd:
+        name: ambifo
+        enabled: false
+      ignore_errors: true
+
+    - name: Remove ambifo systemd service file
+      ansible.builtin.file:
+        path: /etc/systemd/system/ambifo.service
+        state: absent
+
+    - name: Reload systemd after service removal
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    # ── 2. Remove app log directory ─────────────────────────────
+    - name: Remove app log directory
+      ansible.builtin.file:
+        path: /var/log/ambifo
+        state: absent
+
+    # ── 3. Remove Nginx site config ─────────────────────────────
+    - name: Remove Nginx site symlink
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/ambifo
+        state: absent
+
+    - name: Remove Nginx site config file
+      ansible.builtin.file:
+        path: /etc/nginx/sites-available/ambifo
+        state: absent
+
+    - name: Restore Nginx default site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/default
+        dest: /etc/nginx/sites-enabled/default
+        state: link
+      ignore_errors: true
+
+    - name: Reload Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+      ignore_errors: true
+
+    # ── 4. Remove SSL cert and key ──────────────────────────────
+    - name: Remove custom SSL directory
+      ansible.builtin.file:
+        path: /etc/nginx/ssl/ambifo
+        state: absent
+
+    - name: Delete Let's Encrypt cert for domain
+      ansible.builtin.command: certbot delete --cert-name {{ domain_name }} --non-interactive
+      ignore_errors: true
+
+    # ── 5. Remove app user ──────────────────────────────────────
+    - name: Remove ambifo app user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        state: absent
+        remove: true
+      ignore_errors: true
+
+    # ── 6. Remove app files ─────────────────────────────────────
+    - name: Remove app directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: absent
+
+    # ── 7. Remove PostgreSQL database and user ──────────────────
+    - name: Drop PostgreSQL database
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -c "DROP DATABASE IF EXISTS ambifo_crm;"
+      ignore_errors: true
+
+    - name: Drop PostgreSQL user
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -c "DROP ROLE IF EXISTS ambifo_user;"
+      ignore_errors: true
+
+    # ── 8. Remove PostgreSQL completely ─────────────────────────
+    - name: Stop PostgreSQL service
+      ansible.builtin.service:
+        name: postgresql
+        state: stopped
+      ignore_errors: true
+
+    - name: Purge PostgreSQL packages
+      ansible.builtin.apt:
+        name:
+          - postgresql
+          - postgresql-*
+          - postgresql-client
+          - postgresql-client-*
+          - postgresql-contrib
+        state: absent
+        purge: true
+        autoremove: true
+
+    - name: Remove PostgreSQL data directory
+      ansible.builtin.file:
+        path: /var/lib/postgresql
+        state: absent
+
+    - name: Remove PostgreSQL config directory
+      ansible.builtin.file:
+        path: /etc/postgresql
+        state: absent
+
+    - name: Remove PostgreSQL log directory
+      ansible.builtin.file:
+        path: /var/log/postgresql
+        state: absent
+
+    - name: Remove PostgreSQL common config
+      ansible.builtin.file:
+        path: /etc/postgresql-common
+        state: absent
+
+    - name: Remove postgres system user
+      ansible.builtin.user:
+        name: postgres
+        state: absent
+        remove: true
+      ignore_errors: true
+
+    # ── 9. Remove Nginx ─────────────────────────────────────────
+    - name: Stop Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: stopped
+      ignore_errors: true
+
+    - name: Purge Nginx packages
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - nginx-*
+          - certbot
+          - python3-certbot-nginx
+        state: absent
+        purge: true
+        autoremove: true
+
+    - name: Remove Nginx config directory
+      ansible.builtin.file:
+        path: /etc/nginx
+        state: absent
+
+    - name: Remove Let's Encrypt directory
+      ansible.builtin.file:
+        path: /etc/letsencrypt
+        state: absent
+
+    # ── 10. Remove UFW rules added for this app ─────────────────
+    - name: Remove Nginx UFW rule
+      community.general.ufw:
+        rule: allow
+        name: "Nginx Full"
+        delete: true
+      ignore_errors: true
+
+    - name: Disable UFW entirely
+      community.general.ufw:
+        state: disabled
+      ignore_errors: true
+
+    # ── 11. Remove build dependencies ───────────────────────────
+    - name: Remove build tools installed for this app
+      ansible.builtin.apt:
+        name:
+          - build-essential
+          - libpq-dev
+          - python3-pip
+          - python3-venv
+        state: absent
+        purge: true
+        autoremove: true
+
+    # ── 12. Clean apt cache ─────────────────────────────────────
+    - name: Clean apt cache
+      ansible.builtin.apt:
+        autoclean: true
+
+    # ── Done ────────────────────────────────────────────────────
+    - name: Cleanup complete
+      ansible.builtin.debug:
+        msg: |
+          ✅ Ambifo CMS uninstalled successfully.
+             Removed: ambifo service, Nginx, PostgreSQL, SSL certs,
+                      app files (/opt/ambifocms), app user (ambifo),
+                      log directories, UFW rules.
+             Git, Python3 and SSH are intentionally left intact.

@@ -121,6 +121,12 @@
         state: started
         enabled: true
 
+    - name: Set postgres superuser password
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -c
+        "ALTER USER postgres WITH PASSWORD '{{ postgres_password }}';"
+      changed_when: false
+
     - name: Create PostgreSQL role if missing
       ansible.builtin.command: >
         runuser -u postgres -- psql -tAc "
@@ -251,21 +257,51 @@
         state: absent
       notify: Reload nginx
 
+    - name: Create SSL certificate directory
+      ansible.builtin.file:
+        path: /etc/nginx/ssl/ambifo
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
     - name: Write Nginx site config
       ansible.builtin.copy:
         dest: /etc/nginx/sites-available/ambifo
         mode: "0644"
         content: |
+          # Redirect HTTP → HTTPS
           server {
               listen 80;
               server_name {{ domain_name }};
+              return 301 https://$host$request_uri;
+          }
+
+          # HTTPS server (Cloudflare Origin Certificate)
+          server {
+              listen 443 ssl;
+              server_name {{ domain_name }};
+
+              ssl_certificate     /etc/nginx/ssl/ambifo/cert.pem;
+              ssl_certificate_key /etc/nginx/ssl/ambifo/key.pem;
+
+              ssl_protocols       TLSv1.2 TLSv1.3;
+              ssl_ciphers         HIGH:!aNULL:!MD5;
+              ssl_prefer_server_ciphers on;
+                add_header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex" always;
 
               client_max_body_size 30M;
+
+                location = /robots.txt {
+                  default_type text/plain;
+                  return 200 "User-agent: *\nDisallow: /\n";
+                }
 
               location /static/ {
                   alias {{ app_dir }}/static/;
                   expires 30d;
                   add_header Cache-Control "public, immutable";
+                  add_header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex" always;
               }
 
               location /uploads/ {
@@ -312,23 +348,19 @@
         state: enabled
         policy: deny
 
-    # ── 10. SSL certificate (optional, only if domain is set) ───
-    - name: Obtain Let's Encrypt SSL certificate
-      ansible.builtin.command: >
-        certbot --nginx
-        -d {{ domain_name }}
-        --non-interactive
-        --agree-tos
-        --email {{ certbot_email }}
-        --redirect
-      args:
-        creates: /etc/letsencrypt/live/{{ domain_name }}/fullchain.pem
-      when:
-        - certbot_email is defined
-        - certbot_email | length > 0
-        - domain_name != "localhost"
-        - domain_name != "127.0.0.1"
-      notify: Reload nginx
+    # ── 10. Verify SSL cert files are present (manual step) ─────
+    - name: Check Cloudflare Origin Certificate exists
+      ansible.builtin.stat:
+        path: /etc/nginx/ssl/ambifo/cert.pem
+      register: cf_cert
+
+    - name: Fail if cert not uploaded yet
+      ansible.builtin.fail:
+        msg: >
+          Cloudflare Origin Certificate not found at /etc/nginx/ssl/ambifo/cert.pem.
+          Upload cert.pem and key.pem before running this playbook.
+          See deploy/README-ssl.txt for instructions.
+      when: not cf_cert.stat.exists
 
     # ── 11. Final health check ──────────────────────────────────
     - name: Wait for app to be ready

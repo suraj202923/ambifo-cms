@@ -18,18 +18,19 @@ certbot_email: "support@ambifo.com"                             # Let's Encrypt 
 
 # ── Admin credentials ─────────────────────────────────────────────
 admin_username: "admin"
-admin_password: "ChangeMe_Strong_Password_123!"               # <-- REQUIRED  change this
+admin_password: "@mbif0202923"               # <-- REQUIRED  change this
 
 # ── App secret key ────────────────────────────────────────────────
 # Generate with:  python3 -c "import secrets; print(secrets.token_hex(32))"
-app_secret_key: "REPLACE_WITH_64_CHAR_RANDOM_HEX"             # <-- REQUIRED
+app_secret_key: "5993640e2ceb5bac36a3c43f9899382d1542520671d6e1680e72ad048290ff4d"
 
 # ── PostgreSQL database ───────────────────────────────────────────
 db_host: "localhost"
 db_port: 5432
 db_name: "ambifo_crm"
 db_user: "ambifo_user"
-db_password: "ChangeMe_DB_Password_456!"                      # <-- REQUIRED  change this
+db_password: "@mbif0202923"                      # <-- REQUIRED  change this
+postgres_password: "@mbif0202923"                # postgres superuser password
 db_sslmode: "prefer"
 
 # ── SMTP / Email ──────────────────────────────────────────────────

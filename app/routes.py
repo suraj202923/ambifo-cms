@@ -426,10 +426,6 @@ def require_login_for_crm_routes():
     if endpoint in allowed_endpoints:
         return
 
-    # If DB is not ready, let the app-level before_request gate handle the redirect.
-    if not current_app.config.get("DB_READY"):
-        return
-
     if endpoint.startswith("crm.") and not current_user.is_authenticated:
         return redirect(url_for("crm.login", next=request.path))
 

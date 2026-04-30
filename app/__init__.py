@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from flask import Blueprint, Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, render_template
 from flask.cli import with_appcontext
 from flask_login import LoginManager
 from sqlalchemy.engine import make_url
@@ -314,130 +314,6 @@ def _bootstrap_database(app):
             return False, str(exc)
 
 
-def _register_db_setup_blueprint(app):
-    setup_bp = Blueprint("setup", __name__)
-
-    @setup_bp.route("/")
-    def setup_root():
-        if app.config.get("DB_READY"):
-            return redirect(url_for("crm.opportunity_list"))
-        return redirect(url_for("setup.database_setup"))
-
-    @setup_bp.route("/setup/database", methods=["GET", "POST"])
-    def database_setup():
-        if app.config.get("DB_READY"):
-            return redirect(url_for("crm.opportunity_list"))
-
-        defaults = _read_database_defaults(app)
-        if request.method == "POST":
-            action = (request.form.get("action") or "save").strip().lower()
-            connection_url = (request.form.get("connection_url") or "").strip()
-            host = (request.form.get("host") or "").strip()
-            port = (request.form.get("port") or "").strip()
-            name = (request.form.get("name") or "").strip()
-            user = (request.form.get("user") or "").strip()
-            password = request.form.get("password") or ""
-            sslmode = (request.form.get("sslmode") or "prefer").strip() or "prefer"
-
-            form_data = {
-                "url": connection_url,
-                "host": host,
-                "port": port,
-                "name": name,
-                "user": user,
-                "password": password,
-                "sslmode": sslmode,
-            }
-
-            if connection_url:
-                try:
-                    _test_database_url_connection(connection_url)
-                except Exception as exc:
-                    flash(f"Connection failed: {exc}", "error")
-                    return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
-
-                if action == "test":
-                    flash("Connection successful.", "success")
-                    return render_template("db_setup.html", form_data=form_data, db_error=None)
-
-                try:
-                    parsed_parts = _parse_database_url_parts(connection_url, defaults)
-                except Exception:
-                    parsed_parts = {
-                        "host": host or defaults["host"],
-                        "port": port or defaults["port"],
-                        "name": name or defaults["name"],
-                        "user": user or defaults["user"],
-                        "password": password or defaults["password"],
-                        "sslmode": sslmode or defaults["sslmode"],
-                    }
-
-                _save_database_settings(
-                    app,
-                    host=parsed_parts["host"],
-                    port=parsed_parts["port"],
-                    name=parsed_parts["name"],
-                    user=parsed_parts["user"],
-                    password=parsed_parts["password"],
-                    sslmode=parsed_parts["sslmode"],
-                    url=connection_url,
-                )
-                db_ready, db_error = _apply_database_settings_to_runtime(
-                    app,
-                    connection_url=connection_url,
-                    host=parsed_parts["host"],
-                    port=parsed_parts["port"],
-                    name=parsed_parts["name"],
-                    user=parsed_parts["user"],
-                    password=parsed_parts["password"],
-                    sslmode=parsed_parts["sslmode"],
-                )
-
-                if db_ready:
-                    flash("Database settings saved and connected successfully.", "success")
-                    return redirect(url_for("crm.login"))
-
-                flash(f"Saved, but app bootstrap still failed: {db_error}", "error")
-                return render_template("db_setup.html", form_data=form_data, db_error=db_error)
-
-            if not all([host, port, name, user]):
-                flash("Host, port, database name, and user are required.", "error")
-                return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
-
-            try:
-                _test_postgres_connection(host, port, name, user, password, sslmode)
-            except Exception as exc:
-                flash(f"Connection failed: {exc}", "error")
-                return render_template("db_setup.html", form_data=form_data, db_error=app.config.get("DB_ERROR"))
-
-            if action == "test":
-                flash("Connection successful.", "success")
-                return render_template("db_setup.html", form_data=form_data, db_error=None)
-
-            _save_database_settings(app, host, port, name, user, password, sslmode, url="")
-            db_ready, db_error = _apply_database_settings_to_runtime(
-                app,
-                connection_url="",
-                host=host,
-                port=port,
-                name=name,
-                user=user,
-                password=password,
-                sslmode=sslmode,
-            )
-
-            if db_ready:
-                flash("Database settings saved and connected successfully.", "success")
-                return redirect(url_for("crm.login"))
-
-            flash(f"Saved, but app bootstrap still failed: {db_error}", "error")
-            return render_template("db_setup.html", form_data=form_data, db_error=db_error)
-
-        return render_template("db_setup.html", form_data=defaults, db_error=app.config.get("DB_ERROR"))
-
-    app.register_blueprint(setup_bp)
-
-
 def create_app():
     app = Flask(__name__, static_folder="../static", template_folder="templates")
     app.config.from_object(Config)
@@ -461,27 +337,19 @@ def create_app():
     login_manager.login_message_category = "error"
 
     db_ready, db_error = _bootstrap_database(app)
-    app.config["DB_READY"] = db_ready
-    app.config["DB_ERROR"] = db_error
-
-    # IMPORTANT: register DB-gate before_request BEFORE blueprints so it runs first.
-    @app.before_request
-    def require_database_setup():
-        if app.config.get("DB_READY"):
-            return None
-        endpoint = request.endpoint or ""
-        if endpoint == "static" or endpoint.startswith("setup."):
-            return None
-        return redirect(url_for("setup.database_setup"))
+    if not db_ready:
+        raise RuntimeError(f"Database bootstrap failed: {db_error}")
 
     app.register_blueprint(crm_bp)
-    _register_db_setup_blueprint(app)
+
+    @app.after_request
+    def add_noindex_headers(response):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet, noimageindex"
+        return response
 
     @app.errorhandler(500)
     def internal_error(exc):
-        """Catch unhandled 500s and redirect to setup page if DB is not ready."""
-        if not app.config.get("DB_READY"):
-            return redirect(url_for("setup.database_setup"))
+        """Catch unhandled 500s and show error page."""
         return render_template("error_500.html"), 500
 
     @app.cli.command("init-db")
