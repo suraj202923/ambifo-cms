@@ -13,8 +13,8 @@
   vars:
     app_user: ambifo
     app_group: www-data
-    app_dir: /opt/ambifo_cms
-    venv_dir: /opt/ambifo_cms/.venv
+    app_dir: /opt/ambifocms
+    venv_dir: /opt/ambifocms/.venv
     gunicorn_bind: "127.0.0.1:8000"
     gunicorn_workers: 3
     python_bin: python3
