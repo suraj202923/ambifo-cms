@@ -63,6 +63,24 @@
         group: "{{ app_group }}"
         mode: "0755"
 
+    # ── 3. Clone / update code ──────────────────────────────────
+    - name: Clone repository
+      ansible.builtin.git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ git_branch | default('main') }}"
+        force: true
+        update: true
+      become_user: "{{ app_user }}"
+      notify: Restart ambifo
+
+    - name: Set app directory ownership after clone
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        recurse: true
+
     - name: Create uploads directory
       ansible.builtin.file:
         path: "{{ app_dir }}/uploads"
@@ -78,23 +96,6 @@
         owner: "{{ app_user }}"
         group: "{{ app_group }}"
         mode: "0775"
-
-    # ── 3. Clone / update code ──────────────────────────────────
-    - name: Clone repository
-      ansible.builtin.git:
-        repo: "{{ git_repo_url }}"
-        dest: "{{ app_dir }}"
-        version: "{{ git_branch | default('main') }}"
-        force: true
-      become_user: "{{ app_user }}"
-      notify: Restart ambifo
-
-    - name: Set app directory ownership after clone
-      ansible.builtin.file:
-        path: "{{ app_dir }}"
-        owner: "{{ app_user }}"
-        group: "{{ app_group }}"
-        recurse: true
 
     # ── 4. Python virtual environment ───────────────────────────
     - name: Create virtual environment
