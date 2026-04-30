@@ -3,7 +3,10 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Opportunity <span style="font-size:0.85em;font-weight:500;color:#555;">({{ total_count }})</span></h2>
-    <a class="btn" href="{{ url_for('crm.opportunity_new') }}">+ Add Opportunity</a>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+      <button class="btn btn-secondary" type="button" onclick="openQuickAddModal()">+ Quick Add Opportunity</button>
+      <a class="btn" href="{{ url_for('crm.opportunity_new') }}">+ Add Opportunity</a>
+    </div>
   </div>
 
   <form method="get" class="inline-form">
@@ -24,6 +27,7 @@
         <th>Customer Name</th>
         <th>Email</th>
         <th>Phone</th>
+        <th>Cloud</th>
         <th>Segment</th>
         <th>Status</th>
         <th>Assign To</th>
@@ -37,6 +41,7 @@
           <td data-label="Customer Name">{{ customer.customer_name }}</td>
           <td data-label="Email">{{ customer.email }}</td>
           <td data-label="Phone">{{ customer.phone }}</td>
+          <td data-label="Cloud">{{ customer.cloud or 'Not Set' }}</td>
           <td data-label="Segment">
             <form method="post" action="{{ url_for('crm.opportunity_update_segment', customer_id=customer.id, page=pagination.page, q=query, assigned_to=selected_assigned_to) }}">
               <input type="hidden" name="change_remark" value="">
@@ -102,7 +107,7 @@
         </tr>
       {% else %}
         <tr>
-          <td colspan="8">No opportunities found.</td>
+          <td colspan="9">No opportunities found.</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -125,6 +130,46 @@
     </div>
   {% endif %}
 </section>
+
+<!-- Quick Add Opportunity Modal -->
+<div id="quickAddModal" class="email-modal-overlay" style="display:none;" onclick="closeQuickAddModal(event)">
+  <div class="email-modal-box" style="max-width:560px;">
+    <div class="email-modal-header">
+      <span>Quick Add Opportunity</span>
+      <button class="email-modal-close" type="button" onclick="closeQuickAddModal(null)">✕</button>
+    </div>
+    <form method="post" action="{{ url_for('crm.opportunity_quick_add') }}">
+      <div class="email-modal-body">
+        <div class="grid-form" style="margin-top:0;">
+          <label>Customer Name
+            <input name="customer_name" required>
+          </label>
+          <label>Company
+            <input name="account_name" required>
+          </label>
+          <label>Email
+            <input type="email" name="email" required>
+          </label>
+          <label>Phone Number
+            <input name="phone" required>
+          </label>
+          <label class="full">Cloud
+            <select name="cloud" required>
+              <option value="">Select cloud</option>
+              {% for cloud in cloud_operators %}
+                <option value="{{ cloud.name }}">{{ cloud.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="email-modal-footer">
+        <button class="btn" type="submit">Create Opportunity</button>
+        <button class="btn btn-secondary" type="button" onclick="closeQuickAddModal(null)">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <!-- Gathering Link Modal -->
 <div id="gatheringModal" class="email-modal-overlay" style="display:none;" onclick="closeGatheringModal(event)">
@@ -170,13 +215,35 @@
     </div>
     <div class="email-modal-body">
       <p id="emailModalRecipient" class="email-modal-recipient"></p>
-      <label for="emailTemplateSelect">Choose Template</label>
-      <select id="emailTemplateSelect" class="status-select">
-        <option value="">-- Select Template --</option>
-        {% for tpl in email_templates %}
-          <option value="{{ tpl.id }}">{{ tpl.name }}</option>
-        {% endfor %}
-      </select>
+      <label for="emailCcList">CC (optional, comma separated)</label>
+      <input id="emailCcList" class="status-select" type="text" placeholder="manager@company.com, lead@company.com">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:0.6rem;">
+        <button type="button" id="emailModeTemplateBtn" class="btn btn-secondary" onclick="switchEmailMode('template')">Select Template</button>
+        <button type="button" id="emailModeCustomBtn" class="btn btn-secondary" onclick="switchEmailMode('custom')">Write Email</button>
+      </div>
+      <div id="emailTemplateModeBlock">
+        <label for="emailTemplateSelect">Choose Template</label>
+        <select id="emailTemplateSelect" class="status-select">
+          <option value="">-- Select Template --</option>
+          {% for tpl in email_templates %}
+            <option value="{{ tpl.id }}">{{ tpl.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div id="emailCustomModeBlock" style="display:none;">
+        <label for="emailCustomSubject">Subject</label>
+        <input id="emailCustomSubject" class="status-select" type="text" placeholder="Write subject">
+        <label for="emailCustomBody" style="margin-top:0.55rem;display:block;">Body (HTML supported)</label>
+        <textarea id="emailCustomBody" class="status-select" rows="6" placeholder="<p>Hello,</p>"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:0.55rem;">
+          <button type="button" class="btn btn-secondary" onclick="toggleCustomPreview()">Preview</button>
+          <span class="hint-inline">Final send always includes Ambifo header and footer.</span>
+        </div>
+        <div id="emailCustomPreviewWrap" style="display:none;margin-top:0.6rem;border:1px solid #d1d5db;border-radius:8px;background:#fff;padding:0.6rem;">
+          <div style="font-size:0.82rem;margin-bottom:0.4rem;"><strong>Preview Subject:</strong> <span id="emailCustomPreviewSubject"></span></div>
+          <iframe id="emailCustomPreviewFrame" sandbox="allow-same-origin" style="width:100%;min-height:220px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;"></iframe>
+        </div>
+      </div>
       <div id="emailModalMsg" class="email-modal-msg" style="display:none;"></div>
     </div>
     <div class="email-modal-footer">
@@ -205,9 +272,19 @@
 
 <script>
   var _emailModalCustomerId = null;
+  var _emailMode = 'template';
   var _historyModalCustomerId = null;
   var _remarkTargetForm = null;
   var _remarkChangeType = null;
+
+  function openQuickAddModal() {
+    document.getElementById('quickAddModal').style.display = 'flex';
+  }
+
+  function closeQuickAddModal(event) {
+    if (event && event.target !== document.getElementById('quickAddModal')) return;
+    document.getElementById('quickAddModal').style.display = 'none';
+  }
 
   function openRemarkPopup(formEl, changeType) {
     _remarkTargetForm = formEl;
@@ -241,6 +318,11 @@
     _emailModalCustomerId = customerId;
     document.getElementById('emailModalRecipient').textContent = 'To: ' + customerName;
     document.getElementById('emailTemplateSelect').value = '';
+    document.getElementById('emailCcList').value = '';
+    document.getElementById('emailCustomSubject').value = '';
+    document.getElementById('emailCustomBody').value = '';
+    document.getElementById('emailCustomPreviewWrap').style.display = 'none';
+    switchEmailMode('template');
     var msg = document.getElementById('emailModalMsg');
     msg.style.display = 'none';
     msg.textContent = '';
@@ -254,18 +336,89 @@
     document.getElementById('emailModal').style.display = 'none';
   }
 
+  function switchEmailMode(mode) {
+    _emailMode = mode === 'custom' ? 'custom' : 'template';
+    document.getElementById('emailTemplateModeBlock').style.display = _emailMode === 'template' ? 'block' : 'none';
+    document.getElementById('emailCustomModeBlock').style.display = _emailMode === 'custom' ? 'block' : 'none';
+
+    var templateBtn = document.getElementById('emailModeTemplateBtn');
+    var customBtn = document.getElementById('emailModeCustomBtn');
+    templateBtn.className = _emailMode === 'template' ? 'btn' : 'btn btn-secondary';
+    customBtn.className = _emailMode === 'custom' ? 'btn' : 'btn btn-secondary';
+    if (_emailMode !== 'custom') {
+      document.getElementById('emailCustomPreviewWrap').style.display = 'none';
+    }
+  }
+
+  function buildCustomPreviewHtml(bodyHtml) {
+    var safeBody = bodyHtml || '';
+    return '<!doctype html><html><head><meta charset="utf-8">'
+      + '<style>body{font-family:Segoe UI,Arial,sans-serif;margin:0;padding:14px;color:#111827;background:#f8fafc;}'
+      + '.mail{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;}'
+      + '.note{margin-top:10px;font-size:12px;color:#6b7280;}</style></head><body>'
+      + '<div class="mail">' + safeBody + '</div>'
+      + '<div class="note">Preview of editable body content. Ambifo header/footer is added automatically when sending.</div>'
+      + '</body></html>';
+  }
+
+  function toggleCustomPreview() {
+    var wrap = document.getElementById('emailCustomPreviewWrap');
+    if (!wrap) return;
+    if (wrap.style.display === 'none') {
+      updateCustomPreview(true);
+    } else {
+      wrap.style.display = 'none';
+    }
+  }
+
+  function updateCustomPreview(forceShow) {
+    var subject = (document.getElementById('emailCustomSubject').value || '').trim();
+    var body = (document.getElementById('emailCustomBody').value || '').trim();
+    var wrap = document.getElementById('emailCustomPreviewWrap');
+    var subjectEl = document.getElementById('emailCustomPreviewSubject');
+    var frame = document.getElementById('emailCustomPreviewFrame');
+    if (!wrap || !subjectEl || !frame) return;
+
+    if (!subject && !body && !forceShow) {
+      wrap.style.display = 'none';
+      return;
+    }
+
+    subjectEl.textContent = subject || '(No subject)';
+    frame.srcdoc = buildCustomPreviewHtml(body || '<p style="color:#6b7280;">(No body content)</p>');
+    wrap.style.display = 'block';
+  }
+
   function submitEmailModal() {
     var templateId = document.getElementById('emailTemplateSelect').value;
-    if (!templateId) {
-      showModalMsg('Please select a template.', 'error');
-      return;
+    var ccList = (document.getElementById('emailCcList').value || '').trim();
+    var customSubject = (document.getElementById('emailCustomSubject').value || '').trim();
+    var customBody = (document.getElementById('emailCustomBody').value || '').trim();
+
+    if (_emailMode === 'template') {
+      if (!templateId) {
+        showModalMsg('Please select a template.', 'error');
+        return;
+      }
+    } else {
+      if (!customSubject || !customBody) {
+        showModalMsg('Please enter subject and body for custom email.', 'error');
+        return;
+      }
     }
     var btn = document.getElementById('emailSendBtn');
     btn.disabled = true;
     btn.textContent = 'Sending…';
 
     var formData = new FormData();
-    formData.append('template_id', templateId);
+    formData.append('email_source', _emailMode);
+    formData.append('cc_emails', ccList);
+    if (_emailMode === 'template') {
+      formData.append('template_id', templateId);
+    } else {
+      formData.append('custom_subject', customSubject);
+      formData.append('custom_body', customBody);
+    }
 
     fetch('/opportunities/' + _emailModalCustomerId + '/send-email', {
       method: 'POST',
@@ -289,6 +442,13 @@
       btn.disabled = false;
     });
   }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var subj = document.getElementById('emailCustomSubject');
+    var body = document.getElementById('emailCustomBody');
+    if (subj) subj.addEventListener('input', function() { updateCustomPreview(false); });
+    if (body) body.addEventListener('input', function() { updateCustomPreview(false); });
+  });
 
   function showModalMsg(text, type) {
     var msg = document.getElementById('emailModalMsg');

@@ -18,6 +18,14 @@
       <label>Customer Name<input name="customer_name" value="{{ customer.customer_name if customer else '' }}" required></label>
       <label>Email<input type="email" name="email" value="{{ customer.email if customer else '' }}" required></label>
       <label>Phone<input name="phone" value="{{ customer.phone if customer else '' }}"></label>
+      <label>Cloud
+        <select name="cloud">
+          <option value="">Select cloud</option>
+          {% for c in cloud_options %}
+            <option value="{{ c.name }}" {% if customer and customer.cloud == c.name %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <label>City<input name="city" value="{{ customer.city if customer else '' }}"></label>
       <label>AWS ID<input name="aws_id" value="{{ customer.aws_id if customer else '' }}"></label>
       <label>Opportunity ID<input name="opportunity_id" value="{{ customer.opportunity_id if customer else '' }}"></label>
@@ -480,6 +488,25 @@
       </form>
       <p class="hint" style="margin-top:0.45rem;">This sends the invite email and logs an entry in All Updates history. Auto-generation is available only after Teams config is saved in Configuration page.</p>
     </div>
+
+    <div class="ce-block" style="margin-top:0.75rem;">
+      <p class="ce-label">⏰ Send 3 One-Click Availability Options</p>
+      <form method="post" action="{{ url_for('crm.opportunity_send_meeting_availability', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+        <input type="hidden" name="recipient_email" value="{{ customer.email or '' }}">
+        <input type="hidden" name="subject" value="Select Your Preferred Meeting Time - {{ customer.customer_name }}">
+        <label>Option 1 *
+          <input type="datetime-local" name="option_1" required>
+        </label>
+        <label>Option 2 *
+          <input type="datetime-local" name="option_2" required>
+        </label>
+        <label>Option 3 *
+          <input type="datetime-local" name="option_3" required>
+        </label>
+        <button class="btn btn-sm mobile-sticky-submit" type="submit">Send Availability Options</button>
+      </form>
+      <p class="hint" style="margin-top:0.45rem;">Pick any 3 date-time options and click Send. Customer can select one option directly from email.</p>
+    </div>
   </div>
 
   <!-- ══ TAB 5: Documents ═══════════════════════════════ -->
@@ -515,6 +542,65 @@
         </div>
       {% else %}
         <p class="hint" style="margin-top:0.5rem;">No documents uploaded yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ══ TAB 6: Create Diagram ════════════════════════ -->
+  <div id="tab-diagrams" class="tab-pane">
+    <div class="ce-block" style="margin-top:0.5rem;">
+      <p class="ce-label">➕ Add Diagram Macro</p>
+      <form method="post" action="{{ url_for('crm.opportunity_diagram_add', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+        <label>Diagram Name *
+          <input id="newDiagramName" name="diagram_name" required placeholder="e.g. Current Architecture">
+        </label>
+        <label>Macro Key *
+          <input id="newDiagramMacroKey" name="macro_key" required placeholder="e.g. current_architecture">
+        </label>
+        <label class="checkbox-row" style="margin-top:1.6rem;">
+          <input type="checkbox" name="is_active" value="1" checked>
+          Available in template macros
+        </label>
+        <label class="full">Use Case / Requirement for AI (optional)
+          <textarea id="aiDiagramUseCase" rows="2" placeholder="e.g. Hybrid cloud architecture for app + database migration with backup, DR, and security zones"></textarea>
+        </label>
+        <label class="full">Diagram Content (HTML or Mermaid text) *
+          <textarea id="newDiagramContent" name="diagram_content" rows="6" required placeholder="<pre class='mermaid'>graph TD; A-->B;</pre>"></textarea>
+        </label>
+        <button class="btn btn-secondary" type="button" id="aiDiagramGenerateBtn" onclick="generateArchitectureDiagramAI()">✨ AI Generate Diagram</button>
+        <button class="btn btn-sm" type="submit">Save Diagram</button>
+      </form>
+      <p class="hint" style="margin-top:0.45rem;">Use <strong>{{ '{{macro_key}}' }}</strong> in email/document templates. Example: <strong>{{ '{{current_architecture}}' }}</strong>. All active diagrams are also available via <strong>{{ '{{selected_diagrams_html}}' }}</strong>.</p>
+    </div>
+
+    <div class="doc-list">
+      {% for d in customer_diagrams|default([]) %}
+        <div class="doc-item" style="display:block;">
+          <form method="post" action="{{ url_for('crm.opportunity_diagram_update', customer_id=customer.id, diagram_id=d.id) }}" class="grid-form" style="margin-top:0;">
+            <label>Diagram Name *
+              <input name="diagram_name" value="{{ d.diagram_name }}" required>
+            </label>
+            <label>Macro Key *
+              <input name="macro_key" value="{{ d.macro_key }}" required>
+            </label>
+            <label class="checkbox-row" style="margin-top:1.6rem;">
+              <input type="checkbox" name="is_active" value="1" {% if d.is_active %}checked{% endif %}>
+              Available in template macros
+            </label>
+            <label class="full">Diagram Content *
+              <textarea name="diagram_content" rows="6" required>{{ d.diagram_content }}</textarea>
+            </label>
+            <div class="doc-actions" style="grid-column:1 / -1;justify-content:flex-start;">
+              <button class="mini-btn" type="submit">💾 Update</button>
+          </form>
+              <form method="post" action="{{ url_for('crm.opportunity_diagram_delete', customer_id=customer.id, diagram_id=d.id) }}" onsubmit="return confirm('Delete this diagram macro?');" style="margin:0;">
+                <button class="mini-btn danger" type="submit">🗑️ Delete</button>
+              </form>
+            </div>
+          <div class="hint" style="margin-top:0.35rem;">Macro: <strong>{{ '{{' }}{{ d.macro_key }}{{ '}}' }}</strong> • Status: {{ 'Active' if d.is_active else 'Inactive' }} • Updated: {{ d.updated_at.strftime('%Y-%m-%d %H:%M') }}</div>
+        </div>
+      {% else %}
+        <p class="hint" style="margin-top:0.5rem;">No diagrams added yet.</p>
       {% endfor %}
     </div>
   </div>
@@ -633,6 +719,10 @@
       <button class="sidebar-tab" data-tab="gathering" onclick="switchTab('gathering',this)">📋 Gathering Data</button>
       <button class="sidebar-tab" data-tab="meeting" onclick="switchTab('meeting',this)">📅 Meeting Links</button>
       <button class="sidebar-tab" data-tab="documents" onclick="switchTab('documents',this)">📁 Documents</button>
+      <button class="sidebar-tab" data-tab="diagrams" onclick="switchTab('diagrams',this)">📐 Create Diagram</button>
+      {% if is_edit %}
+      <a class="sidebar-tab" href="{{ url_for('crm.opportunity_sow', customer_id=customer.id) }}" style="display:block;text-align:left;text-decoration:none;color:inherit;">📄 Create Document</a>
+      {% endif %}
     </nav>
     {% if customer %}
     <div class="sidebar-meta">
@@ -776,6 +866,38 @@ function openBlockEditModal(id, name, used, prov, peakIops, peakThr, avgIops, av
 function closeBlockEditModal(event) {
   if (event && event.target !== document.getElementById('blockEditModal')) return;
   document.getElementById('blockEditModal').style.display = 'none';
+}
+
+async function generateArchitectureDiagramAI() {
+  var btn = document.getElementById('aiDiagramGenerateBtn');
+  if (!btn) return;
+  var useCase = (document.getElementById('aiDiagramUseCase')?.value || '').trim();
+
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  try {
+    var res = await fetch('/opportunities/{{ customer.id if customer else 0 }}/ai/generate-architecture-diagram', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ use_case: useCase })
+    });
+    var data = await res.json();
+    if (!data.success) {
+      alert(data.message || 'AI generation failed.');
+      return;
+    }
+    var nameEl = document.getElementById('newDiagramName');
+    var keyEl = document.getElementById('newDiagramMacroKey');
+    var contentEl = document.getElementById('newDiagramContent');
+    if (nameEl) nameEl.value = data.diagram_name || nameEl.value;
+    if (keyEl) keyEl.value = data.macro_key || keyEl.value;
+    if (contentEl) contentEl.value = data.diagram_content || contentEl.value;
+  } catch (e) {
+    alert('AI request failed. Check AI settings in Configuration.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ AI Generate Diagram';
+  }
 }
 </script>
 {% endblock %}

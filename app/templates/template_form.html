@@ -2,7 +2,20 @@
 {% block content %}
 <section class="panel narrow">
   <h2>Create Email Template</h2>
-  <p class="hint">Available macros: {{ '{{customer_name}}' }}, {{ '{{account_name}}' }}, {{ '{{email}}' }}, {{ '{{phone}}' }}, {{ '{{city}}' }}, {{ '{{today}}' }}, {{ '{{gathering_form_link}}' }}</p>
+  <p class="hint">Available macros: {{ '{{customer_name}}' }}, {{ '{{account_name}}' }}, {{ '{{email}}' }}, {{ '{{phone}}' }}, {{ '{{city}}' }}, {{ '{{today}}' }}, {{ '{{gathering_form_link}}' }}, {{ '{{selected_diagrams_html}}' }}, and per-opportunity diagram macros such as {{ '{{current_architecture}}' }}</p>
+  <div class="ce-block" style="margin-bottom:0.8rem;">
+    <p class="ce-label">Opportunity Macro Preview</p>
+    <label class="full">Select Opportunity
+      <select id="macroPreviewCustomer" onchange="renderDiagramMacroPreview()">
+        <option value="">-- Select Opportunity --</option>
+        {% for c in customers %}
+          <option value="{{ c.id }}">{{ c.customer_name }}{% if c.account_name %} ({{ c.account_name }}){% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div id="macroPreviewHint" class="hint" style="margin-top:0.45rem;">Select an opportunity to view active diagram macros.</div>
+    <div id="macroPreviewList" class="hint" style="margin-top:0.35rem;"></div>
+  </div>
   <form method="post" class="grid-form">
     <label>Template Name<input name="name" required></label>
     <label class="full">Subject Template<input name="subject_template" required></label>
@@ -10,4 +23,42 @@
     <button class="btn" type="submit">Save Template</button>
   </form>
 </section>
+
+<script>
+const DIAGRAM_MACRO_MAP = {{ diagram_macro_map | tojson }};
+
+function renderDiagramMacroPreview() {
+  var select = document.getElementById('macroPreviewCustomer');
+  var list = document.getElementById('macroPreviewList');
+  var hint = document.getElementById('macroPreviewHint');
+  if (!select || !list || !hint) return;
+
+  var customerId = (select.value || '').trim();
+  if (!customerId) {
+    hint.textContent = 'Select an opportunity to view active diagram macros.';
+    list.innerHTML = '';
+    return;
+  }
+
+  var macros = DIAGRAM_MACRO_MAP[customerId] || [];
+  if (!macros.length) {
+    hint.textContent = 'No active diagram macros found for this opportunity.';
+    list.innerHTML = '';
+    return;
+  }
+
+  hint.textContent = 'Use these macros in subject/body for this opportunity context:';
+  var html = '<ul style="margin:0.25rem 0 0 1rem;">';
+  macros.forEach(function(item) {
+    html += '<li><code>{{' + item.macro_key + '}}</code> - ' + (item.diagram_name || 'Diagram') + '</li>';
+  });
+  html += '<li><code>{{selected_diagrams_html}}</code> - includes all active diagrams for the selected opportunity</li>';
+  html += '</ul>';
+  list.innerHTML = html;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  renderDiagramMacroPreview();
+});
+</script>
 {% endblock %}

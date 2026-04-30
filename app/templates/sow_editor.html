@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Create Document — {{ customer.customer_name }}</title>
+  <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
+  <style>
+    :root {
+      --brand-navy: #0f4c3a;
+      --brand-blue: #0d7f5f;
+      --brand-blue-soft: #d7efe7;
+      --brand-ink: #1a2a24;
+      --brand-accent: #f4a259;
+      --brand-bg: #f7f8ef;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--brand-bg); font-family: 'Segoe UI', Arial, sans-serif; }
+
+    /* ── Top Toolbar ── */
+    .sow-bar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      background: var(--brand-navy); color: #fff;
+      display: flex; align-items: center; gap: 0.55rem;
+      padding: 0.45rem 1rem; flex-wrap: wrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      min-height: 52px;
+    }
+    .sow-bar .back { color: #90caf9; text-decoration: none; font-size: 0.82rem; padding: 0.28rem 0.55rem; border-radius: 5px; border: 1px solid rgba(255,255,255,0.25); white-space: nowrap; }
+    .sow-bar .back:hover { background: rgba(255,255,255,0.12); }
+    .sow-bar .doc-title { font-size: 0.9rem; font-weight: 700; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sow-bar .badge { font-size: 0.68rem; padding: 0.18rem 0.55rem; border-radius: 999px; font-weight: 700; background: var(--brand-accent); color: var(--brand-navy); white-space: nowrap; }
+    .sow-bar .badge.saved { background: #4caf50; color: #fff; }
+    .sow-bar .save-msg { font-size: 0.75rem; color: #a5d6a7; }
+    .sow-bar .template-switch { display: inline-flex; align-items: center; gap: 6px; }
+    .sow-bar .doc-switch { display: inline-flex; align-items: center; gap: 6px; }
+    .sow-bar .doc-switch label { font-size: 0.74rem; color: #e2f3ed; }
+    .sow-bar .doc-switch select { font-size: 0.8rem; padding: 0.25rem 0.4rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); }
+    .sow-bar .template-switch label { font-size: 0.74rem; color: #e2e8f0; }
+    .sow-bar .template-switch select { font-size: 0.8rem; padding: 0.25rem 0.4rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); }
+    .sow-bar .btn-template { background: #f4a259; color: #1a2a24; }
+    .sow-bar .btn-template:hover { background: #e18e47; }
+    .sow-bar .btn-newdoc { background: #ffffff; color: #0f4c3a; border: 1px solid #b8d7ca; }
+    .sow-bar .btn-newdoc:hover { background: #eef7f3; }
+    .sow-bar button {
+      font-size: 0.8rem; padding: 0.35rem 0.7rem; border-radius: 6px;
+      border: none; cursor: pointer; font-weight: 600; white-space: nowrap;
+    }
+    .btn-save  { background: var(--brand-blue); color: #fff; }
+    .btn-save:hover  { background: #0b684f; }
+    .btn-docx  { background: #2e7d32; color: #fff; }
+    .btn-docx:hover  { background: #388e3c; }
+    .btn-pdf   { background: #7b1fa2; color: #fff; }
+    .btn-pdf:hover   { background: #6a1b9a; }
+    .btn-print { background: #4e342e; color: #fff; }
+    .btn-print:hover { background: #6d4c41; }
+    .btn-email { background: #bf360c; color: #fff; }
+    .btn-email:hover { background: #e64a19; }
+
+    /* ── Page Wrapper ── */
+    .sow-wrap { padding: 66px 12px 50px; min-height: 100vh; }
+
+    /* ── A4 Paper ── */
+    .sow-paper {
+      max-width: 870px; margin: 0 auto; background: #fff;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.22);
+    }
+
+    /* ── Document Header (fixed) ── */
+    .doc-header {
+      color: #0f2f5f;
+      padding: 16px 20px;
+      border-bottom: 1px solid #dbe7f6;
+      background: linear-gradient(135deg, #f8fbff 0%, #ecf4ff 100%);
+      text-align: center;
+    }
+    .brand-row { display: block; }
+    .doc-header .brand-logo {
+      height: 42px;
+      max-width: 220px;
+      width: auto;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto;
+    }
+    .doc-header .brand {
+      margin-top: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #0f2f5f;
+    }
+    .doc-header .tagline {
+      margin-top: 6px;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #315b92;
+    }
+    .doc-header .cap-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border: 1px solid #b9d1f2;
+      border-radius: 999px;
+      background: #ffffff;
+      margin: 0 6px 4px 0;
+      white-space: nowrap;
+    }
+    .doc-header .doc-type { margin-top: 10px; font-size: 1.05rem; font-weight: 700; color: #0f4c3a; }
+
+    /* ── Cover Section ── */
+    .doc-cover { padding: 28px 48px; border-bottom: 2px solid #d7ded8; }
+    .cover-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 20px; }
+    .party-card { background: #f4fbf7; border-radius: 8px; padding: 14px 18px; border-top: 4px solid var(--brand-blue); }
+    .party-card.right { border-top-color: var(--brand-accent); }
+    .party-card .plabel { font-size: 0.68rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+    .party-card .pname { font-size: 1rem; font-weight: 700; color: var(--brand-navy); margin-top: 4px; }
+    .party-card .psub  { font-size: 0.82rem; color: #64748b; margin-top: 2px; }
+    .cover-fields { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+    .cf label { font-size: 0.75rem; font-weight: 700; color: #374151; display: block; margin-bottom: 4px; }
+    .cf input {
+      width: 100%; padding: 7px 10px; border: 1px solid #d1d5db;
+      border-radius: 6px; font-size: 0.88rem; font-family: inherit; color: #111;
+    }
+    .cf input:focus { outline: none; border-color: var(--brand-blue); box-shadow: 0 0 0 2px rgba(13,78,166,0.15); }
+    .cover-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }
+    .cover-table th { background: #e7f3ee; padding: 8px 14px; text-align: left; color: #374151; font-weight: 700; }
+    .cover-table td { padding: 7px 14px; border-top: 1px solid #e2e8f0; }
+    .cover-table td:first-child { color: #64748b; width: 32%; }
+
+    /* ── Fixed About Ambifo section ── */
+    .fixed-section { background: #f8fbf9; border-bottom: 1px solid #d7ded8; padding: 20px 48px; }
+    .fixed-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 0.65rem; background: #e2e8f0; color: #64748b;
+      padding: 2px 8px; border-radius: 999px; font-weight: 700; margin-bottom: 8px;
+    }
+    .fixed-section h2 { color: var(--brand-navy); font-size: 1.08rem; margin: 6px 0 10px; border-bottom: 2px solid var(--brand-blue); padding-bottom: 4px; }
+    .fixed-section p { color: #374151; font-size: 0.9rem; line-height: 1.65; margin-bottom: 8px; }
+
+    /* ── Quill Toolbar sticky ── */
+    .quill-bar {
+      position: sticky; top: 52px; z-index: 100;
+      background: #fff; border-bottom: 1px solid #e2e8f0;
+      padding: 2px 48px;
+    }
+    .ql-toolbar.ql-snow { border: none !important; padding: 4px 0 !important; }
+
+    /* ── Editor wrapper ── */
+    .editor-wrap { padding: 4px 48px 36px; }
+    .editor-label {
+      font-size: 0.67rem; font-weight: 700; color: var(--brand-blue);
+      text-transform: uppercase; letter-spacing: 1px; padding: 8px 0 4px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .editor-label::after { content: '✏️  Editable'; font-size: 0.62rem; color: #94a3b8; font-weight: 400; letter-spacing: 0; }
+    .ql-container.ql-snow { border: none !important; }
+    .ql-editor {
+      min-height: 600px; padding: 0 !important;
+      font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+      font-size: 11pt; line-height: 1.7; color: #1e293b;
+    }
+    .ql-editor h1 { color: var(--brand-navy); font-size: 1.25rem; margin: 1.6rem 0 0.4rem; border-bottom: 2px solid var(--brand-blue); padding-bottom: 3px; }
+    .ql-editor h2 { color: var(--brand-blue); font-size: 1.08rem; margin: 1.2rem 0 0.35rem; }
+    .ql-editor h3 { color: #374151; font-size: 0.98rem; margin: 0.9rem 0 0.3rem; }
+    .ql-editor p  { margin: 0.45rem 0; }
+    .ql-editor ul, .ql-editor ol { padding-left: 1.5rem; }
+    .ql-editor li { margin: 0.2rem 0; }
+    .ql-editor blockquote { border-left: 4px solid var(--brand-blue); margin: 0.5rem 0; padding-left: 1rem; color: #475569; }
+
+    /* ── Document Footer (fixed) ── */
+    .doc-footer {
+      background: #fbfcfe;
+      border-top: 1px solid #edf2f7;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    .doc-footer .left { font-size: 13px; line-height: 1.75; color: #1f2937; }
+    .doc-footer .left strong { color: #0f2f5f; font-size: 13px; }
+    .doc-footer .social-mini {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: #0a66c2;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 1;
+      margin-top: 8px;
+    }
+    .doc-footer .confidential { color: #b91c1c; font-weight: 700; font-size: 0.75rem; margin-top: 4px; }
+    .doc-footer .right { font-size: 0.72rem; color: #94a3b8; text-align: right; white-space: nowrap; }
+
+    /* ── Email Modal ── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; z-index: 500;
+      background: rgba(0,0,0,0.6); align-items: center; justify-content: center;
+    }
+    .modal-box { background: #fff; border-radius: 12px; padding: 24px; max-width: 500px; width: 94%; box-shadow: 0 8px 40px rgba(0,0,0,0.3); }
+    .modal-title { font-weight: 700; font-size: 1.05rem; color: var(--brand-navy); margin-bottom: 16px; }
+    .mfield { margin-bottom: 12px; }
+    .mfield label { font-size: 0.8rem; font-weight: 700; color: #374151; display: block; margin-bottom: 4px; }
+    .mfield input, .mfield textarea, .mfield select {
+      width: 100%; padding: 8px 11px; border: 1px solid #d1d5db;
+      border-radius: 6px; font-size: 0.88rem; font-family: inherit; color: #111;
+    }
+    .mfield input:focus, .mfield textarea:focus, .mfield select:focus { outline: none; border-color: var(--brand-blue); }
+    .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .modal-cancel { padding: 8px 18px; background: #f1f5f9; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+    .modal-send   { padding: 8px 18px; background: #c2410c; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 0.85rem; }
+    .modal-send:disabled { background: #9ca3af; cursor: not-allowed; }
+    .modal-msg { font-size: 0.8rem; padding: 8px 10px; border-radius: 6px; margin-top: 8px; display: none; }
+    .modal-msg.success { background: #dcfce7; color: #166534; display: block; }
+    .modal-msg.error   { background: #fee2e2; color: #991b1b; display: block; }
+
+    /* ── Print / PDF ── */
+    @media print {
+      .sow-bar, .quill-bar { display: none !important; }
+      .sow-wrap { padding: 0; background: none; }
+      .sow-paper { box-shadow: none; max-width: 100%; }
+      .fixed-badge { display: none; }
+      .ql-editor { min-height: unset; }
+      .cf input { border: none; font-weight: 600; }
+      .print-hide { display: none !important; }
+      .editor-label { display: none !important; }
+      .doc-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .doc-footer { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      h1, h2, h3 { break-after: avoid; }
+      .doc-cover { break-inside: avoid; }
+      @page { size: A4; margin: 0; }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .doc-header, .doc-cover, .fixed-section, .editor-wrap, .doc-footer { padding-left: 20px; padding-right: 20px; }
+      .doc-header .brand-logo { height: 40px; }
+      .cover-parties { grid-template-columns: 1fr; }
+      .cover-fields  { grid-template-columns: 1fr 1fr; }
+      .quill-bar     { padding: 2px 20px; }
+      .doc-footer    { flex-direction: column; align-items: flex-start; }
+    }
+    @media (max-width: 480px) {
+      .cover-fields { grid-template-columns: 1fr; }
+      .sow-bar .doc-title { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══ TOP TOOLBAR ══════════════════════════════════════════ -->
+<div class="sow-bar" id="sowBar">
+  <a class="back" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id) }}">← Back</a>
+  <span class="doc-title">📄 Create Document — {{ customer.customer_name }}</span>
+  <span class="badge" id="sowBadge">{{ sow.status | title }}</span>
+  <span class="save-msg" id="sowSaveMsg"></span>
+  <form class="doc-switch" method="get" action="{{ url_for('crm.opportunity_sow', customer_id=customer.id) }}">
+    <label for="sow_id">Document</label>
+    <select id="sow_id" name="sow_id">
+      {% for d in sow_documents %}
+      <option value="{{ d.id }}" {% if d.id == sow.id %}selected{% endif %}>{{ d.sow_title or ('Document #' ~ d.id) }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn-template" type="submit">Open</button>
+  </form>
+  <button class="btn-newdoc" type="button" onclick="createNewSowDoc()">+ New Document</button>
+  <form class="template-switch" method="get" action="{{ url_for('crm.opportunity_sow', customer_id=customer.id) }}">
+    <input type="hidden" name="sow_id" value="{{ sow.id }}">
+    <input type="hidden" name="diagram_ids" id="templateApplyDiagramIds" value="">
+    <label for="template_id">Template</label>
+    <select id="template_id" name="template_id">
+      {% for t in master_templates %}
+      <option value="{{ t.id }}" {% if selected_master_template and t.id == selected_master_template.id %}selected{% endif %}>{{ t.template_name }}</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="apply_template" value="1">
+    <button class="btn-template" type="submit">Load</button>
+  </form>
+  <button class="btn-save"  onclick="saveDraft()">💾 Save Draft</button>
+  <button class="btn-template" type="button" onclick="resetTemplateContent()">↺ Reset Template</button>
+  <button class="btn-template" id="aiDocGenerateBtn" onclick="generateDocumentContentAI()">✨ AI Content</button>
+  <button class="btn-docx"  onclick="downloadDocx()">📄 DOCX</button>
+  <button class="btn-pdf"   onclick="downloadPdf()">🧾 PDF</button>
+  <button class="btn-print" onclick="window.print()">🖨️ PDF / Print</button>
+  <button class="btn-email" onclick="openEmailModal()">📧 Send Email</button>
+</div>
+
+<!-- ══ DOCUMENT PAPER ══════════════════════════════════════ -->
+<div class="sow-wrap">
+<div class="sow-paper" id="sowPaper">
+
+  <!-- FIXED: Header -->
+  <div class="doc-header">
+    <div class="brand-row">
+      <img class="brand-logo" src="{{ url_for('static', filename='ambifologo.png') }}" alt="Ambifo logo">
+      <div class="brand">AMBIFO TECHNOLOGY PVT LTD</div>
+      <div class="tagline">
+        <span class="cap-chip">Cloud Strategy</span>
+        <span class="cap-chip">Migration &amp; Modernization</span>
+        <span class="cap-chip">DevOps</span>
+        <span class="cap-chip">AI/ML</span>
+      </div>
+    </div>
+    <div class="doc-type">{{ document_title_label }}</div>
+  </div>
+
+  <!-- Cover: auto-filled + editable meta -->
+  <div class="doc-cover">
+    <div class="cover-fields">
+      <div class="cf">
+        <label>Title</label>
+        <input id="sowTitle" value="{{ sow.sow_title or ('Cloud Migration SOW — ' ~ customer.customer_name) }}" placeholder="Title">
+      </div>
+      <div class="cf">
+        <label>Doc Ref #</label>
+        <input id="docRefNo" value="{{ doc_ref_no }}" readonly>
+      </div>
+      <div class="cf">
+        <label>Date</label>
+        <input id="sowDate" value="{{ sow.sow_date or today }}" placeholder="e.g. 30th April, 2026">
+      </div>
+      <div class="cf">
+        <label>Version</label>
+        <input id="sowVersion" value="{{ sow.version or '1.0' }}" placeholder="e.g. 1.0">
+      </div>
+    </div>
+
+    <div class="print-hide" style="margin-top:14px;">
+      <label for="selectedDiagramIds" style="display:block;font-size:0.78rem;font-weight:700;color:#374151;margin-bottom:6px;">Diagrams</label>
+      <select id="selectedDiagramIds" multiple style="width:100%;min-height:108px;padding:8px;border:1px solid #d1d5db;border-radius:8px;font-size:0.85rem;">
+        {% for diag in customer_diagrams %}
+          <option value="{{ diag.id }}" data-macro-key="{{ diag.macro_key }}" {% if diag.id in selected_diagram_ids %}selected{% endif %}>{{ diag.diagram_name }} ({{ '{{' }}{{ diag.macro_key }}{{ '}}' }})</option>
+        {% endfor %}
+      </select>
+      <div id="macroWarning" style="display:none;margin-top:8px;padding:8px 10px;border:1px solid #fecaca;background:#fff1f2;color:#9f1239;border-radius:8px;font-size:0.78rem;"></div>
+    </div>
+  </div>
+
+  <!-- Quill toolbar (sticky) -->
+  <div class="quill-bar" id="quillBarWrapper"></div>
+
+  <!-- EDITABLE: Main content -->
+  <div class="editor-wrap">
+    <div class="editor-label">Document Content</div>
+    <div class="print-hide" style="margin:0 0 8px 0;">
+      <input id="aiDocObjective" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:0.83rem;" placeholder="AI objective (optional): e.g. Build migration SOW with phases, risks, and landing-zone architecture">
+    </div>
+    <div id="sowEditor"></div>
+  </div>
+
+  <!-- FIXED: Footer -->
+  <div class="doc-footer">
+    <div class="left">
+      <div><strong>Website:</strong> <a href="https://www.ambifo.com" target="_blank" rel="noopener" style="color:#0f4fa8;text-decoration:none;">www.ambifo.com</a></div>
+      <div><strong>Email:</strong> <a href="mailto:support@ambifo.com" style="color:#0f4fa8;text-decoration:none;">support@ambifo.com</a></div>
+      <div><strong>Phone:</strong> +91 9148419502</div>
+      <div><strong>Address:</strong> Building No 674, 18th Main, 3rd Phase, Front of New Land ISRO Quarter, Domlur, Bangalore - 560071</div>
+      <div><a class="social-mini" href="https://www.linkedin.com/company/ambifo-technology" target="_blank" rel="noopener" title="LinkedIn" aria-label="LinkedIn">in</a></div>
+      <span class="confidential">CONFIDENTIAL — Intended solely for the addressee</span>
+    </div>
+    <div class="right">
+      <div>SOW v<span id="footerVersion">{{ sow.version or '1.0' }}</span></div>
+      <div>Last saved: <span id="lastSaved">{{ sow.updated_at.strftime('%d %b %Y %H:%M') if sow.updated_at else 'Not saved' }}</span></div>
+    </div>
+  </div>
+
+</div><!-- .sow-paper -->
+</div><!-- .sow-wrap -->
+
+<!-- ══ EMAIL MODAL ══════════════════════════════════════════ -->
+<div class="modal-overlay" id="emailModal" onclick="modalBgClick(event)">
+  <div class="modal-box">
+    <div class="modal-title">📧 Send SOW via Email (DOCX Attachment)</div>
+    <div class="mfield">
+      <label>Recipient Email</label>
+      <input id="emailTo" type="email" value="{{ customer.email }}" placeholder="recipient@example.com">
+    </div>
+    <div class="mfield">
+      <label>Subject</label>
+      <input id="emailSubject" value="Statement of Work — {{ customer.account_name or customer.customer_name }}">
+    </div>
+    <div class="mfield">
+      <label>Message</label>
+      <textarea id="emailBody" rows="5">Dear {{ customer.customer_name }},
+
+Please find attached the Statement of Work for your review and approval.
+
+We look forward to your feedback.
+
+Regards,
+Ambifo Technology Pvt Ltd</textarea>
+    </div>
+    <div class="mfield">
+      <label>Attachment Format</label>
+      <select id="emailAttachmentFormat">
+        <option value="docx">DOCX</option>
+        <option value="pdf">PDF</option>
+      </select>
+    </div>
+    <div class="modal-msg" id="emailMsg"></div>
+    <div class="modal-footer">
+      <button class="modal-cancel" onclick="closeEmailModal()">Cancel</button>
+      <button class="modal-send" id="emailSendBtn" onclick="sendEmail()">📧 Send DOCX</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SCRIPTS ══════════════════════════════════════════════ -->
+<script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+<script>
+  const CUST_ID = {{ customer.id }};
+  let SOW_ID    = {{ sow.id }};
+  const MASTER_TEMPLATE_ID = {{ selected_master_template.id if selected_master_template else 'null' }};
+
+  const defaultContent = {{ default_content | tojson }};
+  const savedContent   = {{ (sow.content_html or '') | tojson }};
+  const BASE_MACROS = ['customer_name', 'company_name', 'cloud_platform', 'customer_email', 'customer_phone', 'today', 'selected_diagrams_html'];
+
+  // ── Init Quill ──────────────────────────────────────────
+  const quill = new Quill('#sowEditor', {
+    theme: 'snow',
+    modules: {
+      toolbar: {
+        container: [
+          [{ header: [1, 2, 3, false] }],
+          ['bold', 'italic', 'underline'],
+          [{ list: 'ordered' }, { list: 'bullet' }],
+          ['blockquote'],
+          [{ color: [] }, { background: [] }],
+          ['clean']
+        ]
+      }
+    },
+    placeholder: 'Edit the SOW content here…'
+  });
+
+  // Move Quill toolbar to sticky bar
+  const tb = document.querySelector('.ql-toolbar');
+  document.getElementById('quillBarWrapper').appendChild(tb);
+
+  // Load content
+  quill.root.innerHTML = savedContent || defaultContent;
+
+  // Dirty tracking
+  let isDirty = false;
+  quill.on('text-change', () => {
+    isDirty = true;
+    refreshUnresolvedMacroWarning();
+  });
+  ['sowTitle', 'sowDate', 'sowVersion'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => { isDirty = true; });
+  });
+  document.getElementById('selectedDiagramIds')?.addEventListener('change', () => {
+    isDirty = true;
+    refreshUnresolvedMacroWarning();
+  });
+  window.addEventListener('beforeunload', e => {
+    if (isDirty) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  // ── Collect form data ───────────────────────────────────
+  function collectData() {
+    const selectedIds = Array.from(document.getElementById('selectedDiagramIds')?.selectedOptions || []).map(function(opt) {
+      return parseInt(opt.value, 10);
+    }).filter(function(v) {
+      return Number.isInteger(v) && v > 0;
+    });
+
+    return {
+      sow_id:      SOW_ID,
+      sow_title:   document.getElementById('sowTitle').value,
+      doc_ref_no:  document.getElementById('docRefNo').value,
+      sow_date:    document.getElementById('sowDate').value,
+      version:     document.getElementById('sowVersion').value,
+      master_template_id: MASTER_TEMPLATE_ID,
+      selected_diagram_ids: selectedIds,
+      content_html: quill.root.innerHTML,
+    };
+  }
+
+  function createNewSowDoc() {
+    const proposed = prompt('Enter new SOW document name:', `SOW ${new Date().toLocaleDateString()}`);
+    if (proposed === null) return;
+    const title = proposed.trim();
+    const url = new URL(`/opportunities/${CUST_ID}/sow`, window.location.origin);
+    url.searchParams.set('new_doc', '1');
+    if (title) url.searchParams.set('sow_title', title);
+    var selectedIds = Array.from(document.getElementById('selectedDiagramIds')?.selectedOptions || []).map(function(opt) { return opt.value; }).filter(Boolean);
+    if (selectedIds.length) url.searchParams.set('diagram_ids', selectedIds.join(','));
+    if (MASTER_TEMPLATE_ID) url.searchParams.set('template_id', String(MASTER_TEMPLATE_ID));
+    window.location.href = url.toString();
+  }
+
+  function resetTemplateContent() {
+    if (!confirm('Reset editor content to current template defaults? This will not save until you click Save Draft.')) {
+      return;
+    }
+    quill.root.innerHTML = defaultContent || '';
+    isDirty = true;
+    refreshUnresolvedMacroWarning();
+  }
+
+  document.querySelector('.template-switch')?.addEventListener('submit', function() {
+    var selectedIds = Array.from(document.getElementById('selectedDiagramIds')?.selectedOptions || []).map(function(opt) { return opt.value; }).filter(Boolean);
+    document.getElementById('templateApplyDiagramIds').value = selectedIds.join(',');
+  });
+
+  function selectedDiagramMacroKeys() {
+    return new Set(Array.from(document.getElementById('selectedDiagramIds')?.selectedOptions || []).map(function(opt) {
+      return (opt.getAttribute('data-macro-key') || '').trim();
+    }).filter(Boolean));
+  }
+
+  function unresolvedMacroKeysInContent() {
+    var html = quill.root.innerHTML || '';
+    var re = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+    var found = new Set();
+    var match;
+    while ((match = re.exec(html)) !== null) {
+      if (match[1]) found.add(match[1]);
+    }
+
+    var allowed = selectedDiagramMacroKeys();
+    BASE_MACROS.forEach(function(k) { allowed.add(k); });
+
+    return Array.from(found).filter(function(k) { return !allowed.has(k); });
+  }
+
+  function refreshUnresolvedMacroWarning() {
+    var box = document.getElementById('macroWarning');
+    if (!box) return;
+
+    var unresolved = unresolvedMacroKeysInContent();
+    if (!unresolved.length) {
+      box.style.display = 'none';
+      box.textContent = '';
+      return;
+    }
+
+    box.style.display = 'block';
+    box.innerHTML = 'Unresolved macros in document content: <strong>' + unresolved.map(function(k) { return '{{' + k + '}}'; }).join(', ') + '</strong>. Select matching diagrams or update template content.';
+  }
+
+  refreshUnresolvedMacroWarning();
+
+  // ── Save Draft ──────────────────────────────────────────
+  async function saveDraft() {
+    const btn = document.querySelector('.btn-save');
+    btn.textContent = '⏳ Saving…';
+    btn.disabled = true;
+    try {
+      const res  = await fetch(`/opportunities/${CUST_ID}/sow/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectData()),
+      });
+      const data = await res.json();
+      if (data.success) {
+        SOW_ID = data.sow_id;
+        isDirty = false;
+        const badge = document.getElementById('sowBadge');
+        badge.textContent = 'Saved';
+        badge.className = 'badge saved';
+        const msg = document.getElementById('sowSaveMsg');
+        msg.textContent = '✓ ' + new Date().toLocaleTimeString();
+        document.getElementById('lastSaved').textContent = new Date().toLocaleString();
+        document.getElementById('footerVersion').textContent = document.getElementById('sowVersion').value;
+        setTimeout(() => { msg.textContent = ''; }, 3000);
+      } else {
+        alert('Save failed: ' + data.message);
+      }
+    } catch { alert('Save failed. Please try again.'); }
+    finally { btn.textContent = '💾 Save Draft'; btn.disabled = false; }
+  }
+
+  // ── Download DOCX ───────────────────────────────────────
+  async function downloadDocx() {
+    const btn = document.querySelector('.btn-docx');
+    btn.textContent = '⏳ Generating…';
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/opportunities/${CUST_ID}/sow/download-docx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectData()),
+      });
+      if (!res.ok) { alert('DOCX generation failed: ' + await res.text()); return; }
+      const blob  = await res.blob();
+      const url   = URL.createObjectURL(blob);
+      const a     = document.createElement('a');
+      const title = (document.getElementById('sowTitle').value || 'SOW').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const ver   = document.getElementById('sowVersion').value || '1.0';
+      a.href = url; a.download = `${title}_v${ver}.docx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { alert('DOCX download failed.'); }
+    finally { btn.textContent = '📄 DOCX'; btn.disabled = false; }
+  }
+
+  async function downloadPdf() {
+    const btn = document.querySelector('.btn-pdf');
+    btn.textContent = '⏳ Generating…';
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/opportunities/${CUST_ID}/sow/download-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectData()),
+      });
+      if (!res.ok) { alert('PDF generation failed: ' + await res.text()); return; }
+      const blob  = await res.blob();
+      const url   = URL.createObjectURL(blob);
+      const a     = document.createElement('a');
+      const title = (document.getElementById('sowTitle').value || 'SOW').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const ver   = document.getElementById('sowVersion').value || '1.0';
+      a.href = url; a.download = `${title}_v${ver}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { alert('PDF download failed.'); }
+    finally { btn.textContent = '🧾 PDF'; btn.disabled = false; }
+  }
+
+  // ── Email Modal ─────────────────────────────────────────
+  function openEmailModal() {
+    document.getElementById('emailModal').style.display = 'flex';
+    document.getElementById('emailAttachmentFormat').value = 'docx';
+    document.getElementById('emailSendBtn').textContent = '📧 Send DOCX';
+    document.getElementById('emailMsg').className = 'modal-msg';
+    document.getElementById('emailMsg').textContent = '';
+  }
+  function closeEmailModal() { document.getElementById('emailModal').style.display = 'none'; }
+  function modalBgClick(e) { if (e.target === document.getElementById('emailModal')) closeEmailModal(); }
+
+  document.getElementById('emailAttachmentFormat')?.addEventListener('change', function() {
+    var fmt = (this.value || 'docx').toUpperCase();
+    document.getElementById('emailSendBtn').textContent = `📧 Send ${fmt}`;
+  });
+
+  async function sendEmail() {
+    const btn  = document.getElementById('emailSendBtn');
+    const msg  = document.getElementById('emailMsg');
+    const to   = document.getElementById('emailTo').value.trim();
+    if (!to || !to.includes('@')) {
+      msg.className = 'modal-msg error';
+      msg.textContent = 'Please enter a valid email address.';
+      return;
+    }
+    btn.textContent = '⏳ Sending…'; btn.disabled = true;
+    msg.className = 'modal-msg'; msg.textContent = '';
+    try {
+      const payload = Object.assign(collectData(), {
+        to_email: to,
+        subject:  document.getElementById('emailSubject').value,
+        body:     document.getElementById('emailBody').value,
+        attachment_format: (document.getElementById('emailAttachmentFormat').value || 'docx'),
+      });
+      const res  = await fetch(`/opportunities/${CUST_ID}/sow/send-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      msg.className = 'modal-msg ' + (data.success ? 'success' : 'error');
+      msg.textContent = data.message;
+      if (data.success) setTimeout(closeEmailModal, 2200);
+    } catch {
+      msg.className = 'modal-msg error';
+      msg.textContent = 'Request failed. Please try again.';
+    } finally { btn.textContent = '📧 Send DOCX'; btn.disabled = false; }
+  }
+
+  async function generateDocumentContentAI() {
+    var btn = document.getElementById('aiDocGenerateBtn');
+    var objective = (document.getElementById('aiDocObjective')?.value || '').trim();
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+    try {
+      var res = await fetch(`/opportunities/${CUST_ID}/ai/generate-document-content`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objective: objective })
+      });
+      var data = await res.json();
+      if (!data.success) {
+        alert(data.message || 'AI generation failed.');
+        return;
+      }
+      quill.root.innerHTML = data.content_html || quill.root.innerHTML;
+      isDirty = true;
+      refreshUnresolvedMacroWarning();
+    } catch (e) {
+      alert('AI request failed. Check AI settings in Configuration.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '✨ AI Content';
+    }
+  }
+</script>
+</body>
+</html>

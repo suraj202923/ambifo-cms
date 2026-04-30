@@ -45,6 +45,125 @@
         </form>
       </section>
 
+      <section class="panel config-card mobile-collapsible" id="meeting-config">
+        <h3>Meeting Availability</h3>
+        <p class="hint">Controls tokenized customer availability form links inserted in template emails.</p>
+        <form method="post" class="grid-form">
+          <input type="hidden" name="action" value="save_meeting_settings">
+          <label>Availability Link Expiry (days)
+            <input type="number" min="1" max="90" name="meeting_availability_link_expiry_days" value="{{ meeting.availability_link_expiry_days if meeting else '7' }}">
+          </label>
+          <button class="btn" type="submit">Update Meeting Settings</button>
+        </form>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="app-config">
+        <h3>Application URL</h3>
+        <p class="hint">Used in email links (for example meeting availability form links).</p>
+        <form method="post" class="grid-form">
+          <input type="hidden" name="action" value="save_app_settings">
+          <label>App Base URL
+            <input name="app_base_url" value="{{ app_settings.base_url if app_settings else '' }}" placeholder="https://crm.ambifo.com">
+          </label>
+          <button class="btn" type="submit">Update Application URL</button>
+        </form>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="ai-config">
+        <h3>AI Settings</h3>
+        <p class="hint">Used by AI generation buttons for email templates, document content, and architecture diagrams. Only one provider is active at a time.</p>
+        <p class="hint" style="margin-top:4px;">
+          Currently Active Provider:
+          <strong style="padding:2px 8px;border-radius:999px;background:{% if ai and ai.active_provider == 'gemini' %}#ede9fe{% else %}#e0f2fe{% endif %};color:{% if ai and ai.active_provider == 'gemini' %}#6d28d9{% else %}#075985{% endif %};">
+            {{ (ai.active_provider if ai else 'openai') | upper }}
+          </strong>
+        </p>
+        <form method="post" class="grid-form">
+          <input type="hidden" name="action" value="save_ai_settings">
+
+          <label>Active Provider
+            <select name="ai_active_provider" id="ai_active_provider" required>
+              <option value="openai" {% if ai and ai.active_provider == 'openai' %}selected{% endif %}>OpenAI</option>
+              <option value="gemini" {% if ai and ai.active_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+            </select>
+          </label>
+
+          <label class="checkbox-row full">
+            <input type="checkbox" name="ai_activate_selected_provider" checked>
+            Activate selected provider on save (auto-applies when dropdown provider is changed)
+          </label>
+
+          <div id="openai-fields" class="full">
+            <label>OpenAI API Key
+              <input type="password" data-provider="openai" name="openai_api_key" value="{{ ai.openai_api_key if ai else '' }}" placeholder="sk-...">
+            </label>
+
+            <label>OpenAI Model {% if ai and ai.active_provider == 'openai' %}<span class="hint-inline" style="color:#0284c7;">(active)</span>{% endif %}
+              <input data-provider="openai" name="openai_model" value="{{ ai.openai_model if ai else 'gpt-4o-mini' }}" placeholder="gpt-4o-mini">
+            </label>
+
+            <label class="full">OpenAI Base URL
+              <input data-provider="openai" name="openai_base_url" value="{{ ai.openai_base_url if ai else 'https://api.openai.com/v1' }}" placeholder="https://api.openai.com/v1">
+            </label>
+          </div>
+
+          <div id="gemini-fields" class="full">
+            <label>Gemini API Key
+              <input type="password" data-provider="gemini" name="gemini_api_key" value="{{ ai.gemini_api_key if ai else '' }}" placeholder="AIza...">
+            </label>
+
+            <label>Gemini Model {% if ai and ai.active_provider == 'gemini' %}<span class="hint-inline" style="color:#7c3aed;">(active)</span>{% endif %}
+              <input data-provider="gemini" name="gemini_model" value="{{ ai.gemini_model if ai else 'gemini-1.5-flash' }}" placeholder="gemini-1.5-flash">
+            </label>
+
+            <label class="full">Gemini Base URL
+              <input data-provider="gemini" name="gemini_base_url" value="{{ ai.gemini_base_url if ai else 'https://generativelanguage.googleapis.com/v1beta' }}" placeholder="https://generativelanguage.googleapis.com/v1beta">
+            </label>
+          </div>
+
+          <p class="hint full">Prompts are Ambifo-specific by default for all generation actions.</p>
+          <button class="btn" type="submit">Update AI Settings</button>
+        </form>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="sow-master-config">
+        <h3>Document Template</h3>
+        <p class="hint">Create templates here, then open the section manager page to add/edit/remove/resequence sections.</p>
+        <p class="hint">Supported placeholders: {% raw %}{{customer_name}}, {{company_name}}, {{cloud_platform}}, {{customer_email}}, {{customer_phone}}, {{today}}, {{selected_diagrams_html}}{% endraw %}</p>
+        <p class="hint">Diagram-specific macros (for example {% raw %}{{current_architecture}}{% endraw %}) come from customer diagrams and are selected per document in opportunity <strong>Create Document</strong>.</p>
+
+        <form method="post" class="inline-form" style="margin-bottom:10px;">
+          <input type="hidden" name="action" value="add_sow_master_template">
+          <input name="sow_template_name" placeholder="New template name" required>
+          <button class="btn" type="submit">Add Template</button>
+        </form>
+
+        <form method="get" class="inline-form" style="margin-bottom:10px;">
+          <label style="display:flex;gap:6px;align-items:center;">
+            Template
+            <select name="sow_template_id" required>
+              {% for t in sow_master_templates %}
+                <option value="{{ t.id }}" {% if selected_sow_template and t.id == selected_sow_template.id %}selected{% endif %}>{{ t.template_name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="btn" type="submit">Load Template</button>
+        </form>
+
+        <form method="post" class="inline-form" style="margin-bottom:10px;">
+          <input type="hidden" name="sow_template_id" value="{{ selected_sow_template.id if selected_sow_template else '' }}">
+          <button class="btn" type="submit" name="action" value="duplicate_sow_master_template" {% if not selected_sow_template %}disabled{% endif %}>Duplicate Template</button>
+          <button class="btn btn-danger" type="submit" name="action" value="delete_sow_master_template" {% if not selected_sow_template or sow_template_count <= 1 %}disabled{% endif %} onclick="return confirm('Delete selected document template?');">Delete Template</button>
+          {% if selected_sow_template %}
+            <span class="hint">Used by {{ selected_sow_template_usage_count }} opportunity drafts.</span>
+          {% endif %}
+        </form>
+
+        {% if selected_sow_template %}
+          <a class="btn" href="{{ url_for('crm.configuration_sow_template_sections', template_id=selected_sow_template.id) }}">Open Section Manager</a>
+        {% endif %}
+      </section>
+
       <section class="panel config-card mobile-collapsible" id="status-config">
         <h3>Status</h3>
         <form method="post" class="inline-form">
@@ -88,6 +207,28 @@
             </form>
           {% else %}
             <p>No segments yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel config-card mobile-collapsible" id="cloud-config">
+        <h3>Cloud Operators</h3>
+        <form method="post" class="inline-form">
+          <input type="hidden" name="action" value="add_cloud_operator">
+          <input name="cloud_name" placeholder="New cloud operator" required>
+          <button class="btn" type="submit">Add</button>
+        </form>
+
+        <div class="status-list">
+          {% for cloud in cloud_operators %}
+            <form method="post" class="row-editor">
+              <input type="hidden" name="cloud_id" value="{{ cloud.id }}">
+              <input name="cloud_name" value="{{ cloud.name }}" required>
+              <button class="btn" type="submit" name="action" value="update_cloud_operator">Update</button>
+              <button class="btn btn-danger" type="submit" name="action" value="delete_cloud_operator" onclick="return confirm('Delete this cloud operator?');">Delete</button>
+            </form>
+          {% else %}
+            <p>No cloud operators yet.</p>
           {% endfor %}
         </div>
       </section>
@@ -154,8 +295,13 @@
       <div class="config-links">
         <a href="#smtp-config">SMTP Configuration</a>
         <a href="#teams-config">Teams Configuration</a>
+        <a href="#meeting-config">Meeting Availability</a>
+        <a href="#app-config">Application URL</a>
+        <a href="#ai-config">AI Settings</a>
+        <a href="#sow-master-config">Document Template</a>
         <a href="#status-config">Status</a>
         <a href="#segment-config">Segment</a>
+        <a href="#cloud-config">Cloud Operators</a>
         <a href="#update-tags-config">Update Tags</a>
         <a href="#admin-users-config">Admin Users</a>
         <a href="#restart-config">Restart Application</a>
@@ -172,14 +318,37 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
 
-  if (window.innerWidth > 760) return;
-  document.querySelectorAll('.mobile-collapsible > h3').forEach(function(title) {
-    title.addEventListener('click', function() {
-      var card = title.closest('.mobile-collapsible');
-      if (!card) return;
-      card.classList.toggle('expanded');
+  if (window.innerWidth <= 760) {
+    document.querySelectorAll('.mobile-collapsible > h3').forEach(function(title) {
+      title.addEventListener('click', function() {
+        var card = title.closest('.mobile-collapsible');
+        if (!card) return;
+        card.classList.toggle('expanded');
+      });
     });
-  });
+  }
+
+  var providerSelect = document.getElementById('ai_active_provider');
+  function syncAiProviderFields() {
+    if (!providerSelect) return;
+    var selectedProvider = providerSelect.value || 'openai';
+    var openaiWrap = document.getElementById('openai-fields');
+    var geminiWrap = document.getElementById('gemini-fields');
+
+    if (openaiWrap) openaiWrap.style.display = selectedProvider === 'openai' ? '' : 'none';
+    if (geminiWrap) geminiWrap.style.display = selectedProvider === 'gemini' ? '' : 'none';
+
+    document.querySelectorAll('[data-provider]').forEach(function(input) {
+      var owner = input.getAttribute('data-provider');
+      input.disabled = owner !== selectedProvider;
+    });
+  }
+
+  if (providerSelect) {
+    providerSelect.addEventListener('change', syncAiProviderFields);
+    syncAiProviderFields();
+  }
+
 });
 </script>
 {% endblock %}

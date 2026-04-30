@@ -16,6 +16,7 @@ class Customer(db.Model):
     customer_name = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(255), nullable=False, unique=True)
     phone = db.Column(db.String(100), nullable=True)
+    cloud = db.Column(db.String(80), nullable=True)
     city = db.Column(db.String(120), nullable=True)
     aws_id = db.Column(db.String(120), nullable=True)
     opportunity_id = db.Column(db.String(120), nullable=True)
@@ -115,6 +116,22 @@ class CustomerDocument(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     customer = db.relationship("Customer", backref="documents")
+
+
+class CustomerDiagram(db.Model):
+    __tablename__ = "customer_diagrams"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    diagram_name = db.Column(db.String(160), nullable=False)
+    macro_key = db.Column(db.String(80), nullable=False)
+    diagram_content = db.Column(db.Text, nullable=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="diagrams")
 
 
 class GatheringServerDetail(db.Model):
@@ -235,6 +252,15 @@ class OpportunitySegment(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class OpportunityCloudOperator(db.Model):
+    __tablename__ = "opportunity_cloud_operators"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class OpportunityUpdateTag(db.Model):
     __tablename__ = "opportunity_update_tags"
 
@@ -260,6 +286,89 @@ class MeetingInvite(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     customer = db.relationship("Customer", backref="meeting_invites")
+
+
+class CustomerSOW(db.Model):
+    __tablename__ = "customer_sows"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    sow_title = db.Column(db.String(255), nullable=True)
+    version = db.Column(db.String(20), nullable=False, default="1.0")
+    master_template_id = db.Column(db.Integer, nullable=True, index=True)
+    selected_diagram_ids = db.Column(db.Text, nullable=True)
+    sow_date = db.Column(db.String(50), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="draft")
+    content_html = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.String(80), nullable=True)
+
+    customer = db.relationship("Customer", backref="sows")
+
+
+class SOWMasterTemplate(db.Model):
+    __tablename__ = "sow_master_templates"
+
+    id = db.Column(db.Integer, primary_key=True)
+    template_key = db.Column(db.String(40), nullable=False, unique=True, index=True, default="default")
+    template_name = db.Column(db.String(120), nullable=False, default="Default Template")
+    section_about = db.Column(db.Text, nullable=True)
+    section_offerings = db.Column(db.Text, nullable=True)
+    section_business_background = db.Column(db.Text, nullable=True)
+    section_project_overview = db.Column(db.Text, nullable=True)
+    section_problem_statement = db.Column(db.Text, nullable=True)
+    section_document_objective = db.Column(db.Text, nullable=True)
+    section_success_criteria = db.Column(db.Text, nullable=True)
+    section_proposed_solution = db.Column(db.Text, nullable=True)
+    section_scope_schedule = db.Column(db.Text, nullable=True)
+    section_project_governance = db.Column(db.Text, nullable=True)
+    section_commercials_signoff = db.Column(db.Text, nullable=True)
+    content_html = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_by = db.Column(db.String(80), nullable=True)
+
+
+class SOWMasterTemplateSection(db.Model):
+    __tablename__ = "sow_master_template_sections"
+
+    id = db.Column(db.Integer, primary_key=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("sow_master_templates.id"), nullable=False, index=True)
+    section_name = db.Column(db.String(160), nullable=False)
+    sequence_no = db.Column(db.Integer, nullable=False, default=1)
+    content_html = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    template = db.relationship("SOWMasterTemplate", backref="sections")
+
+
+class MeetingAvailabilityRequest(db.Model):
+    __tablename__ = "meeting_availability_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    recipient_email = db.Column(db.String(255), nullable=False)
+    subject = db.Column(db.String(255), nullable=False)
+    option_1_at = db.Column(db.DateTime, nullable=False)
+    option_2_at = db.Column(db.DateTime, nullable=False)
+    option_3_at = db.Column(db.DateTime, nullable=False)
+    customer_option_1_at = db.Column(db.DateTime, nullable=True)
+    customer_option_2_at = db.Column(db.DateTime, nullable=True)
+    customer_option_3_at = db.Column(db.DateTime, nullable=True)
+    extra_recipients = db.Column(db.Text, nullable=True)
+    customer_note = db.Column(db.Text, nullable=True)
+    customer_submitted_at = db.Column(db.DateTime, nullable=True)
+    selected_option = db.Column(db.Integer, nullable=True)
+    selected_at = db.Column(db.DateTime, nullable=True)
+    expires_at = db.Column(db.DateTime, nullable=True, index=True)
+    status = db.Column(db.String(40), nullable=False, default="sent")
+    created_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="meeting_availability_requests")
 
 
 class User(UserMixin, db.Model):

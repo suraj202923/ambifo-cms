@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 
 from config import Config
 from app.models import Customer, OpportunityUpdateTag, User, db
-from app.routes import crm_bp
+from app.routes import crm_bp, ensure_default_system_email_templates
 
 
 login_manager = LoginManager()
@@ -73,6 +73,84 @@ def _ensure_runtime_schema_updates():
         history_columns = {col["name"] for col in inspector.get_columns("opportunity_histories")}
         if "tag_name" not in history_columns:
             db.session.execute(text("ALTER TABLE opportunity_histories ADD COLUMN tag_name VARCHAR(40)"))
+
+    if "meeting_availability_requests" in existing_tables:
+        mar_columns = {col["name"] for col in inspector.get_columns("meeting_availability_requests")}
+        mar_desired = {
+            "customer_option_1_at": "ALTER TABLE meeting_availability_requests ADD COLUMN customer_option_1_at TIMESTAMP",
+            "customer_option_2_at": "ALTER TABLE meeting_availability_requests ADD COLUMN customer_option_2_at TIMESTAMP",
+            "customer_option_3_at": "ALTER TABLE meeting_availability_requests ADD COLUMN customer_option_3_at TIMESTAMP",
+            "extra_recipients": "ALTER TABLE meeting_availability_requests ADD COLUMN extra_recipients TEXT",
+            "customer_note": "ALTER TABLE meeting_availability_requests ADD COLUMN customer_note TEXT",
+            "customer_submitted_at": "ALTER TABLE meeting_availability_requests ADD COLUMN customer_submitted_at TIMESTAMP",
+        }
+        for column_name, ddl in mar_desired.items():
+            if column_name in mar_columns:
+                continue
+            db.session.execute(text(ddl))
+
+    if "customers" in existing_tables:
+        customer_columns = {col["name"] for col in inspector.get_columns("customers")}
+        if "cloud" not in customer_columns:
+            db.session.execute(text("ALTER TABLE customers ADD COLUMN cloud VARCHAR(80)"))
+
+    if "customer_sows" in existing_tables:
+        sow_columns = {col["name"] for col in inspector.get_columns("customer_sows")}
+        if "master_template_id" not in sow_columns:
+            db.session.execute(text("ALTER TABLE customer_sows ADD COLUMN master_template_id INTEGER"))
+        if "selected_diagram_ids" not in sow_columns:
+            db.session.execute(text("ALTER TABLE customer_sows ADD COLUMN selected_diagram_ids TEXT"))
+
+    if "sow_master_templates" in existing_tables:
+        master_columns = {col["name"] for col in inspector.get_columns("sow_master_templates")}
+        master_desired = {
+            "template_name": "ALTER TABLE sow_master_templates ADD COLUMN template_name VARCHAR(120)",
+            "section_about": "ALTER TABLE sow_master_templates ADD COLUMN section_about TEXT",
+            "section_offerings": "ALTER TABLE sow_master_templates ADD COLUMN section_offerings TEXT",
+            "section_business_background": "ALTER TABLE sow_master_templates ADD COLUMN section_business_background TEXT",
+            "section_project_overview": "ALTER TABLE sow_master_templates ADD COLUMN section_project_overview TEXT",
+            "section_problem_statement": "ALTER TABLE sow_master_templates ADD COLUMN section_problem_statement TEXT",
+            "section_document_objective": "ALTER TABLE sow_master_templates ADD COLUMN section_document_objective TEXT",
+            "section_success_criteria": "ALTER TABLE sow_master_templates ADD COLUMN section_success_criteria TEXT",
+            "section_proposed_solution": "ALTER TABLE sow_master_templates ADD COLUMN section_proposed_solution TEXT",
+            "section_scope_schedule": "ALTER TABLE sow_master_templates ADD COLUMN section_scope_schedule TEXT",
+            "section_project_governance": "ALTER TABLE sow_master_templates ADD COLUMN section_project_governance TEXT",
+            "section_commercials_signoff": "ALTER TABLE sow_master_templates ADD COLUMN section_commercials_signoff TEXT",
+        }
+        for column_name, ddl in master_desired.items():
+            if column_name in master_columns:
+                continue
+            db.session.execute(text(ddl))
+
+    if "sow_master_template_sections" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE sow_master_template_sections ("
+            "id SERIAL PRIMARY KEY, "
+            "template_id INTEGER NOT NULL, "
+            "section_name VARCHAR(160) NOT NULL, "
+            "sequence_no INTEGER NOT NULL DEFAULT 1, "
+            "content_html TEXT NOT NULL, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+        db.session.execute(text("CREATE INDEX idx_sow_master_template_sections_template_id ON sow_master_template_sections (template_id)"))
+
+    if "customer_diagrams" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE customer_diagrams ("
+            "id SERIAL PRIMARY KEY, "
+            "customer_id INTEGER NOT NULL, "
+            "diagram_name VARCHAR(160) NOT NULL, "
+            "macro_key VARCHAR(80) NOT NULL, "
+            "diagram_content TEXT NOT NULL, "
+            "is_active BOOLEAN NOT NULL DEFAULT TRUE, "
+            "created_by VARCHAR(80), "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+        db.session.execute(text("CREATE INDEX idx_customer_diagrams_customer_id ON customer_diagrams (customer_id)"))
 
     default_tags = [
         ("important", "#c0392b"),
@@ -220,206 +298,15 @@ def _parse_database_url_parts(db_url, defaults):
     }
 
 
-def _seed_welcome_template():
-    from app.models import EmailTemplate
-    WELCOME_SUBJECT = "🚀 Introduction – Ambifo Technology Pvt Ltd | Cloud & AI Solutions"
-    WELCOME_BODY = """\
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Introduction – Ambifo Technology</title></head>
-<body style="margin:0;padding:0;background:#f0f4f8;font-family:'Segoe UI',Arial,sans-serif;">
-
-<!-- Wrapper -->
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f4f8;padding:30px 0;">
-<tr><td align="center">
-<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
-
-    <!-- ===== HEADER / LOGO BANNER ===== -->
-    <tr>
-        <td style="background:linear-gradient(135deg,#0a1f5c 0%,#1565c0 55%,#00b4d8 100%);padding:36px 40px 28px;text-align:center;">
-            <div style="display:inline-block;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.3);border-radius:12px;padding:10px 28px;margin-bottom:14px;">
-                <span style="font-size:32px;font-weight:900;letter-spacing:4px;color:#ffffff;text-transform:uppercase;font-family:'Segoe UI',Arial,sans-serif;">AMBIFO</span>
-                <span style="display:block;font-size:11px;letter-spacing:2px;color:#90caf9;margin-top:2px;text-transform:uppercase;">Technology Pvt Ltd</span>
-            </div>
-            <div style="margin-top:8px;">
-                <span style="display:inline-block;background:#ffd600;color:#0a1f5c;font-size:11px;font-weight:700;border-radius:20px;padding:4px 14px;letter-spacing:1px;text-transform:uppercase;">⭐ Premier AWS &amp; Azure Consulting Partner</span>
-            </div>
-        </td>
-    </tr>
-
-    <!-- ===== GREETING ===== -->
-    <tr>
-        <td style="padding:36px 40px 0;">
-            <p style="font-size:17px;color:#1a237e;font-weight:700;margin:0 0 8px;">👋 Dear {{customer_name}},</p>
-            <p style="font-size:15px;color:#37474f;line-height:1.7;margin:0 0 18px;">Hope this message finds you well!</p>
-            <div style="background:#e3f2fd;border-left:5px solid #1565c0;border-radius:0 10px 10px 0;padding:16px 20px;margin-bottom:20px;">
-                <p style="margin:0;font-size:15px;color:#0d47a1;line-height:1.7;">
-                    I'm reaching out from <strong>Ambifo Technology Pvt Ltd</strong> — a <span style="background:#fff9c4;padding:1px 6px;border-radius:4px;">☁️ cloud-native company</span> and
-                    <span style="background:#fff9c4;padding:1px 6px;border-radius:4px;">🏆 Premier Consulting Partner</span> with both
-                    <strong>AWS</strong> and <strong>Microsoft Azure</strong>. We bring deep expertise across
-                    AI/ML, cloud security, data analytics, and digital transformation initiatives.
-                </p>
-            </div>
-        </td>
-    </tr>
-
-    <!-- ===== SERVICES HEADING ===== -->
-    <tr>
-        <td style="padding:0 40px 16px;">
-            <p style="font-size:15px;color:#37474f;line-height:1.7;margin:0 0 18px;">
-                Please find attached our company profile and a snapshot of our core offerings for your reference:
-            </p>
-            <p style="font-size:16px;font-weight:800;color:#0a1f5c;margin:0 0 14px;text-transform:uppercase;letter-spacing:1px;">✨ Our Core Services</p>
-        </td>
-    </tr>
-
-    <!-- ===== SERVICE CARDS ===== -->
-    <tr>
-        <td style="padding:0 30px 20px;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">
-
-                <!-- Row 1 -->
-                <tr>
-                    <td width="50%" style="padding:6px;">
-                        <div style="background:#e8f5e9;border-radius:12px;padding:16px 18px;border-top:4px solid #43a047;">
-                            <div style="font-size:22px;margin-bottom:6px;">☁️</div>
-                            <div style="font-size:13px;font-weight:800;color:#1b5e20;margin-bottom:4px;">Cloud Solutions</div>
-                            <div style="font-size:12px;color:#388e3c;line-height:1.5;">End-to-end consulting, migration, cost optimization &amp; managed services across AWS &amp; Azure</div>
-                        </div>
-                    </td>
-                    <td width="50%" style="padding:6px;">
-                        <div style="background:#f3e5f5;border-radius:12px;padding:16px 18px;border-top:4px solid #8e24aa;">
-                            <div style="font-size:22px;margin-bottom:6px;">🤖</div>
-                            <div style="font-size:13px;font-weight:800;color:#4a148c;margin-bottom:4px;">Generative AI &amp; ML</div>
-                            <div style="font-size:12px;color:#7b1fa2;line-height:1.5;">Tailored use cases, PoCs &amp; advisory via our <strong>GenAI Tech Studio</strong></div>
-                        </div>
-                    </td>
-                </tr>
-
-                <!-- Row 2 -->
-                <tr>
-                    <td width="50%" style="padding:6px;">
-                        <div style="background:#e3f2fd;border-radius:12px;padding:16px 18px;border-top:4px solid #1565c0;">
-                            <div style="font-size:22px;margin-bottom:6px;">📊</div>
-                            <div style="font-size:13px;font-weight:800;color:#0d47a1;margin-bottom:4px;">Data Analytics &amp; BI</div>
-                            <div style="font-size:12px;color:#1565c0;line-height:1.5;">Real-time insights built on AWS and Snowflake</div>
-                        </div>
-                    </td>
-                    <td width="50%" style="padding:6px;">
-                        <div style="background:#fff3e0;border-radius:12px;padding:16px 18px;border-top:4px solid #ef6c00;">
-                            <div style="font-size:22px;margin-bottom:6px;">⚙️</div>
-                            <div style="font-size:13px;font-weight:800;color:#bf360c;margin-bottom:4px;">DevOps &amp; Agile</div>
-                            <div style="font-size:12px;color:#e65100;line-height:1.5;">CI/CD, DevSecOps, and full SDLC automation</div>
-                        </div>
-                    </td>
-                </tr>
-
-                <!-- Row 3 -->
-                <tr>
-                    <td width="50%" style="padding:6px;">
-                        <div style="background:#fce4ec;border-radius:12px;padding:16px 18px;border-top:4px solid #c62828;">
-                            <div style="font-size:22px;margin-bottom:6px;">🔒</div>
-                            <div style="font-size:13px;font-weight:800;color:#880e4f;margin-bottom:4px;">Cloud Security</div>
-                            <div style="font-size:12px;color:#c62828;line-height:1.5;">IAM, governance, compliance &amp; proactive threat management</div>
-                        </div>
-                    </td>
-                    <td width="50%" style="padding:6px;">
-                        <div style="background:#e0f7fa;border-radius:12px;padding:16px 18px;border-top:4px solid #00838f;">
-                            <div style="font-size:22px;margin-bottom:6px;">🚀</div>
-                            <div style="font-size:13px;font-weight:800;color:#006064;margin-bottom:4px;">App Modernization</div>
-                            <div style="font-size:12px;color:#00838f;line-height:1.5;">Scalable, cloud-native infrastructure with minimal disruption</div>
-                        </div>
-                    </td>
-                </tr>
-
-                <!-- Row 4 – full width -->
-                <tr>
-                    <td colspan="2" style="padding:6px;">
-                        <div style="background:linear-gradient(90deg,#1a237e,#283593);border-radius:12px;padding:16px 18px;">
-                            <div style="font-size:22px;margin-bottom:6px;">🤝</div>
-                            <div style="font-size:13px;font-weight:800;color:#ffd600;margin-bottom:6px;">ISV Partnerships</div>
-                            <div style="font-size:12px;color:#bbdefb;line-height:1.6;">
-                                Strategic alliances with world-class technology vendors:&nbsp;
-                                <span style="background:#ffd600;color:#0a1f5c;border-radius:4px;padding:2px 8px;font-weight:700;margin:2px;display:inline-block;">CrowdStrike</span>
-                                <span style="background:#ffd600;color:#0a1f5c;border-radius:4px;padding:2px 8px;font-weight:700;margin:2px;display:inline-block;">Zscaler</span>
-                                <span style="background:#ffd600;color:#0a1f5c;border-radius:4px;padding:2px 8px;font-weight:700;margin:2px;display:inline-block;">Snowflake</span>
-                                <span style="background:#ffd600;color:#0a1f5c;border-radius:4px;padding:2px 8px;font-weight:700;margin:2px;display:inline-block;">Veeam</span>
-                            </div>
-                        </div>
-                    </td>
-                </tr>
-
-            </table>
-        </td>
-    </tr>
-
-    <!-- ===== WHY US HIGHLIGHT ===== -->
-    <tr>
-        <td style="padding:0 40px 24px;">
-            <div style="background:#fffde7;border:1px solid #fdd835;border-radius:12px;padding:18px 22px;">
-                <p style="margin:0 0 8px;font-size:14px;font-weight:800;color:#f57f17;">💡 Why Ambifo for Azure Cloud?</p>
-                <p style="margin:0;font-size:14px;color:#37474f;line-height:1.7;">
-                    I understand your current setup is running on
-                    <span style="background:#fff9c4;padding:1px 6px;border-radius:4px;font-weight:700;">Azure Cloud Services</span>
-                    and you're exploring potential <strong>Cloud Solutions or Managed Services on Azure</strong>.
-                    We would love to discuss how Ambifo can add value to your journey. 🌟
-                </p>
-            </div>
-        </td>
-    </tr>
-
-    <!-- ===== CTA ===== -->
-    <tr>
-        <td style="padding:0 40px 32px;text-align:center;">
-            <div style="background:#f9fbe7;border:1px solid #c5e1a5;border-radius:12px;padding:20px 24px;">
-                <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#33691e;">📅 Let's Connect!</p>
-                <p style="margin:0 0 16px;font-size:14px;color:#558b2f;line-height:1.6;">
-                    Kindly <strong>confirm your availability</strong> and share your office address so we can plan a visit. Looking forward to meeting you in person! 🤝
-                </p>
-                <a href="mailto:sales@ambifo.com" style="display:inline-block;background:linear-gradient(135deg,#0a1f5c,#1565c0);color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;border-radius:25px;padding:12px 32px;letter-spacing:0.5px;">📧 Schedule a Meeting</a>
-            </div>
-        </td>
-    </tr>
-
-    <!-- ===== FOOTER ===== -->
-    <tr>
-        <td style="background:linear-gradient(135deg,#0a1f5c,#1565c0);padding:28px 40px;text-align:center;">
-            <p style="margin:0 0 6px;font-size:16px;font-weight:900;color:#ffffff;letter-spacing:3px;">AMBIFO</p>
-            <p style="margin:0 0 10px;font-size:12px;color:#90caf9;">Technology Pvt Ltd</p>
-            <p style="margin:0;font-size:11px;color:#64b5f6;">🏆 Premier AWS &amp; Azure Consulting Partner &nbsp;|&nbsp; ☁️ Cloud · AI · Security · Data</p>
-        </td>
-    </tr>
-
-</table>
-</td></tr>
-</table>
-
-</body>
-</html>
-"""
-    existing = EmailTemplate.query.filter_by(name="Welcome – Ambifo Introduction").first()
-    if existing:
-        existing.subject_template = WELCOME_SUBJECT
-        existing.body_template = WELCOME_BODY
-        db.session.commit()
-    else:
-        db.session.add(EmailTemplate(
-            name="Welcome – Ambifo Introduction",
-            subject_template=WELCOME_SUBJECT,
-            body_template=WELCOME_BODY,
-        ))
-        db.session.commit()
-
-
 def _bootstrap_database(app):
     with app.app_context():
         try:
             db.session.execute(text("SELECT 1"))
             db.create_all()
             _ensure_runtime_schema_updates()
+            ensure_default_system_email_templates()
             _ensure_default_admin(app)
-            _seed_welcome_template()
+            db.session.commit()
             db.session.remove()
             return True, None
         except Exception as exc:
@@ -602,8 +489,9 @@ def create_app():
     def init_db_command():
         db.create_all()
         _ensure_runtime_schema_updates()
+        ensure_default_system_email_templates()
         _ensure_default_admin(app)
-        _seed_welcome_template()
+        db.session.commit()
         print("Database tables created.")
 
     @app.cli.command("import-master-tracker")

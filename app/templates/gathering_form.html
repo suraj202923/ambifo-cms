@@ -6,6 +6,10 @@
   <title>Ambifo – Gathering Form</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
   <style>
+    .gf-brand { display:flex; align-items:center; gap:0.7rem; margin-bottom:0.85rem; }
+    .gf-brand img { width:54px; height:54px; object-fit:contain; background:#fff; border-radius:10px; padding:0.3rem; border:1px solid var(--line); }
+    .gf-brand-title { margin:0; font-size:1.05rem; color:#0a1f5c; }
+    .gf-brand-sub { margin:0.15rem 0 0; font-size:0.82rem; color:#556b63; }
     .gf-section-title { font-size:1.05rem; font-weight:700; color:var(--brand); margin:1.2rem 0 0.5rem; border-bottom:2px solid var(--line); padding-bottom:0.3rem; }
     .server-row { border:1px solid var(--line); border-radius:8px; padding:0.85rem; margin-bottom:0.75rem; background:#f9fbf9; }
     .server-row-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.65rem; font-weight:600; }
@@ -62,12 +66,30 @@
     .locked-box { background:#fff1f1; border:2px solid #efc2c2; border-radius:8px; padding:1rem 1.1rem; margin:0.75rem 0; color:#6b1a1a; }
     .locked-box h3 { margin:0 0 0.35rem; color:#8a1c1c; font-size:1rem; }
     .save-bar { position:sticky; top:0; z-index:10; background:#fff; border-bottom:1px solid var(--line); padding:0.55rem 0; margin:0 0 1rem; display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap; }
-    @media (max-width:600px) { .server-grid { grid-template-columns:1fr; } }
+    @media (max-width:760px) {
+      .gf-brand img { width:46px; height:46px; }
+      .gf-brand-title { font-size:0.98rem; }
+      .save-bar { position:sticky; bottom:0; top:auto; background:#fff; border-top:1px solid var(--line); border-bottom:none; padding:0.55rem 0; margin:1rem 0 0; }
+      .save-bar .btn { width:100%; max-width:100%; }
+      .import-actions .btn,
+      .link-actions .btn,
+      .btn.btn-secondary { width:100%; max-width:100%; }
+    }
+    @media (max-width:600px) {
+      .server-grid { grid-template-columns:1fr; }
+    }
   </style>
 </head>
 <body>
 <main class="page">
   <section class="panel narrow">
+    <div class="gf-brand">
+      <img src="{{ url_for('static', filename='ambifologo.png') }}" alt="Ambifo Logo">
+      <div>
+        <h2 class="gf-brand-title">Ambifo Technology Pvt Ltd</h2>
+        <p class="gf-brand-sub">Secure Customer Data Collection Form</p>
+      </div>
+    </div>
     <h2>Customer Information Gathering</h2>
     <div class="count-strip">
       <span class="count-pill">Servers: {{ request_record.server_details | length }}</span>
