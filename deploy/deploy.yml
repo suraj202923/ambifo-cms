@@ -1,0 +1,361 @@
+---
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  Ambifo CMS — Ubuntu Deployment Playbook (Ansible)          ║
+# ║  Run: ansible-playbook -i hosts.ini deploy.yml --ask-become-pass
+# ╚══════════════════════════════════════════════════════════════╝
+
+- name: Deploy Ambifo CMS on Ubuntu
+  hosts: ambifo_server
+  become: true
+  vars_files:
+    - vars.yml
+
+  vars:
+    app_user: ambifo
+    app_group: www-data
+    app_dir: /opt/ambifo_cms
+    venv_dir: /opt/ambifo_cms/.venv
+    gunicorn_bind: "127.0.0.1:8000"
+    gunicorn_workers: 3
+    python_bin: python3
+
+  # ─────────────────────────────────────────────────────────────
+  tasks:
+
+    # ── 1. System packages ──────────────────────────────────────
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install system dependencies
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-venv
+          - python3-pip
+          - build-essential
+          - libpq-dev
+          - git
+          - nginx
+          - postgresql
+          - postgresql-contrib
+          - certbot
+          - python3-certbot-nginx
+          - ufw
+          - curl
+        state: present
+
+    # ── 2. App user ─────────────────────────────────────────────
+    - name: Create app user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        groups: "{{ app_group }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Create app directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
+
+    - name: Create uploads directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}/uploads"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0775"
+
+    - name: Create documents directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}/documents"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0775"
+
+    # ── 3. Clone / update code ──────────────────────────────────
+    - name: Clone repository
+      ansible.builtin.git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ git_branch | default('main') }}"
+        force: true
+      become_user: "{{ app_user }}"
+      notify: Restart ambifo
+
+    - name: Set app directory ownership after clone
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        recurse: true
+
+    # ── 4. Python virtual environment ───────────────────────────
+    - name: Create virtual environment
+      ansible.builtin.command:
+        cmd: "{{ python_bin }} -m venv {{ venv_dir }}"
+        creates: "{{ venv_dir }}/bin/activate"
+      become_user: "{{ app_user }}"
+
+    - name: Upgrade pip
+      ansible.builtin.pip:
+        name: pip
+        state: latest
+        virtualenv: "{{ venv_dir }}"
+      become_user: "{{ app_user }}"
+
+    - name: Install Python requirements
+      ansible.builtin.pip:
+        requirements: "{{ app_dir }}/requirements.txt"
+        virtualenv: "{{ venv_dir }}"
+      become_user: "{{ app_user }}"
+      notify: Restart ambifo
+
+    # ── 5. PostgreSQL setup ─────────────────────────────────────
+    - name: Ensure PostgreSQL is started
+      ansible.builtin.service:
+        name: postgresql
+        state: started
+        enabled: true
+
+    - name: Create PostgreSQL database
+      ansible.builtin.postgresql_db:
+        name: "{{ db_name }}"
+        state: present
+      become_user: postgres
+
+    - name: Create PostgreSQL user
+      ansible.builtin.postgresql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "ALL"
+        db: "{{ db_name }}"
+        state: present
+      become_user: postgres
+
+    - name: Grant all privileges on database to user
+      ansible.builtin.postgresql_privs:
+        database: "{{ db_name }}"
+        role: "{{ db_user }}"
+        type: database
+        privs: ALL
+        state: present
+      become_user: postgres
+
+    # ── 6. App configuration (appsettings.json) ─────────────────
+    - name: Write appsettings.json
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/appsettings.json"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0640"
+        content: |
+          {
+            "App": {
+              "SecretKey": "{{ app_secret_key }}",
+              "BaseUrl": "{{ app_base_url }}",
+              "UploadFolder": "uploads",
+              "MaxContentLength": 26214400
+            },
+            "Auth": {
+              "DefaultAdminUsername": "{{ admin_username }}",
+              "DefaultAdminPassword": "{{ admin_password }}"
+            },
+            "Database": {
+              "Url": "",
+              "Host": "{{ db_host | default('localhost') }}",
+              "Port": {{ db_port | default(5432) }},
+              "Name": "{{ db_name }}",
+              "User": "{{ db_user }}",
+              "Password": "{{ db_password }}",
+              "SSLMode": "{{ db_sslmode | default('prefer') }}"
+            },
+            "SMTP": {
+              "Host": "{{ smtp_host | default('') }}",
+              "Port": {{ smtp_port | default(587) }},
+              "Username": "{{ smtp_username | default('') }}",
+              "Password": "{{ smtp_password | default('') }}",
+              "UseTLS": {{ smtp_use_tls | default('true') }},
+              "MailFrom": "{{ smtp_mail_from | default('noreply@ambifo.com') }}"
+            }
+          }
+      notify: Restart ambifo
+
+    # ── 7. Systemd service ──────────────────────────────────────
+    - name: Write systemd service file
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ambifo.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Ambifo CMS Gunicorn
+          After=network.target postgresql.service
+
+          [Service]
+          User={{ app_user }}
+          Group={{ app_group }}
+          WorkingDirectory={{ app_dir }}
+          Environment=PATH={{ venv_dir }}/bin
+          ExecStart={{ venv_dir }}/bin/gunicorn \
+              --workers {{ gunicorn_workers }} \
+              --bind {{ gunicorn_bind }} \
+              --timeout 120 \
+              --access-logfile /var/log/ambifo/access.log \
+              --error-logfile /var/log/ambifo/error.log \
+              run:app
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+        - Restart ambifo
+
+    - name: Create log directory
+      ansible.builtin.file:
+        path: /var/log/ambifo
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
+
+    - name: Enable and start ambifo service
+      ansible.builtin.systemd:
+        name: ambifo
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # ── 8. Nginx configuration ──────────────────────────────────
+    - name: Remove default Nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Reload nginx
+
+    - name: Write Nginx site config
+      ansible.builtin.copy:
+        dest: /etc/nginx/sites-available/ambifo
+        mode: "0644"
+        content: |
+          server {
+              listen 80;
+              server_name {{ domain_name }};
+
+              client_max_body_size 30M;
+
+              location /static/ {
+                  alias {{ app_dir }}/static/;
+                  expires 30d;
+                  add_header Cache-Control "public, immutable";
+              }
+
+              location /uploads/ {
+                  alias {{ app_dir }}/uploads/;
+                  internal;
+              }
+
+              location / {
+                  proxy_pass http://{{ gunicorn_bind }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_read_timeout 120s;
+                  proxy_connect_timeout 10s;
+              }
+          }
+      notify: Reload nginx
+
+    - name: Enable Nginx site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/ambifo
+        dest: /etc/nginx/sites-enabled/ambifo
+        state: link
+      notify: Reload nginx
+
+    - name: Test Nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    # ── 9. Firewall ─────────────────────────────────────────────
+    - name: Allow SSH through UFW
+      community.general.ufw:
+        rule: allow
+        name: OpenSSH
+
+    - name: Allow Nginx HTTP and HTTPS through UFW
+      community.general.ufw:
+        rule: allow
+        name: "Nginx Full"
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+        policy: deny
+
+    # ── 10. SSL certificate (optional, only if domain is set) ───
+    - name: Obtain Let's Encrypt SSL certificate
+      ansible.builtin.command: >
+        certbot --nginx
+        -d {{ domain_name }}
+        --non-interactive
+        --agree-tos
+        --email {{ certbot_email }}
+        --redirect
+      args:
+        creates: /etc/letsencrypt/live/{{ domain_name }}/fullchain.pem
+      when:
+        - certbot_email is defined
+        - certbot_email | length > 0
+        - domain_name != "localhost"
+        - domain_name != "127.0.0.1"
+      notify: Reload nginx
+
+    # ── 11. Final health check ──────────────────────────────────
+    - name: Wait for app to be ready
+      ansible.builtin.uri:
+        url: "http://{{ gunicorn_bind }}/login"
+        method: GET
+        status_code: 200
+      retries: 10
+      delay: 5
+      register: health_check
+      until: health_check.status == 200
+
+    - name: Print deployment success
+      ansible.builtin.debug:
+        msg: |
+          ✅ Ambifo CMS deployed successfully!
+             App URL  : {{ app_base_url }}
+             Domain   : {{ domain_name }}
+             DB name  : {{ db_name }}
+             Log dir  : /var/log/ambifo/
+             Service  : sudo systemctl status ambifo
+             Logs     : sudo journalctl -u ambifo -f
+
+  # ─────────────────────────────────────────────────────────────
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart ambifo
+      ansible.builtin.systemd:
+        name: ambifo
+        state: restarted
+        daemon_reload: true
+
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
