@@ -1,5 +1,3 @@
 # Never commit real secrets to git
-vars.yml
-hosts.ini
 *.pem
 *.ppk
