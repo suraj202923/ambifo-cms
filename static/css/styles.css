@@ -351,6 +351,10 @@ td {
   display: none;
 }
 
+.mobile-install-btn {
+  display: none;
+}
+
 .mobile-collapsible > h3 {
   margin-top: 0;
 }
@@ -635,6 +639,17 @@ td {
     background: rgba(247, 248, 239, 0.96);
     border-top: 1px solid var(--line);
     backdrop-filter: blur(4px);
+  }
+
+  .mobile-install-btn {
+    position: fixed;
+    right: 0.8rem;
+    bottom: calc(3.9rem + env(safe-area-inset-bottom));
+    z-index: 1001;
+    border-radius: 999px;
+    box-shadow: 0 8px 18px rgba(12, 28, 21, 0.2);
+    padding: 0.65rem 0.9rem;
+    font-size: 0.85rem;
   }
 
   .mobile-quickbar a {

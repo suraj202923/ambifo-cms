@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from flask import Flask, render_template
+from flask import Flask, render_template, send_from_directory
 from flask.cli import with_appcontext
 from flask_login import LoginManager
 from sqlalchemy.engine import make_url
@@ -341,6 +341,16 @@ def create_app():
         raise RuntimeError(f"Database bootstrap failed: {db_error}")
 
     app.register_blueprint(crm_bp)
+
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        return send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
+
+    @app.get("/sw.js")
+    def service_worker():
+        response = send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
     @app.after_request
     def add_noindex_headers(response):
