@@ -57,6 +57,14 @@
 
     # ── 3. Clone / update code ──────────────────────────────────
     # git clone creates app_dir automatically — do NOT pre-create it
+    - name: Mark app directory as trusted git safe.directory
+      ansible.builtin.shell: >
+        git config --global --get-all safe.directory | grep -Fx "{{ app_dir }}"
+        || git config --global --add safe.directory "{{ app_dir }}"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
     - name: Clone repository (first run) or pull latest (re-runs)
       ansible.builtin.git:
         repo: "{{ git_repo_url }}"
