@@ -1,10 +1,16 @@
 import smtplib
+from pathlib import Path
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
 from email import encoders
+from email.utils import formatdate
 
 from html import escape
+from urllib.parse import urlparse
+
+from flask import has_request_context, request
 
 from app.models import SystemSetting
 
@@ -37,15 +43,79 @@ class EmailService:
         sender = SystemSetting.get_value("smtp.mail_from", self.app.config.get("MAIL_FROM"))
         return host, username, password, port, use_tls, sender
 
+    def _get_sender_address(self, sender, username):
+        # Prefer explicit configured sender; fallback to SMTP username when it looks like an email.
+        if sender and "@" in str(sender):
+            return str(sender).strip()
+        if username and "@" in str(username):
+            return str(username).strip()
+        return ""
+
+    def _open_smtp_client(self, host, port, use_tls):
+        # Common provider pattern: port 465 expects implicit SSL, while 587 uses STARTTLS.
+        if use_tls and int(port) == 465:
+            smtp = smtplib.SMTP_SSL(host, port, timeout=20)
+            smtp.ehlo()
+            return smtp
+
+        smtp = smtplib.SMTP(host, port, timeout=20)
+        smtp.ehlo()
+        if use_tls:
+            smtp.starttls()
+            smtp.ehlo()
+        return smtp
+
     def _get_effective_app_base_url(self):
         configured = (SystemSetting.get_value("app.base_url", "") or "").strip()
         if configured:
             return configured.rstrip("/")
-        return (self.app.config.get("APP_BASE_URL") or "http://127.0.0.1:5000").rstrip("/")
 
-    def _wrap_with_ambifo_branding(self, html_body):
+        base_url = (self.app.config.get("APP_BASE_URL") or "http://127.0.0.1:5000").rstrip("/")
+
+        try:
+            parsed = urlparse(base_url)
+            host = (parsed.hostname or "").lower()
+        except Exception:
+            host = ""
+
+        # If configured base URL is localhost, prefer the actual incoming host for email links/images.
+        if host in {"localhost", "127.0.0.1", "0.0.0.0"} and has_request_context():
+            req_host = (request.host or "").lower()
+            if req_host and not req_host.startswith("localhost") and not req_host.startswith("127.0.0.1"):
+                scheme = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip()
+                return f"{scheme}://{request.host}".rstrip("/")
+
+        return base_url
+
+    def _logo_file_path(self):
+        return Path(self.app.root_path).parent / "static" / "ambifologo.png"
+
+    def _build_inline_logo_part(self):
+        logo_path = self._logo_file_path()
+        if not logo_path.exists():
+            return None, None
+
+        try:
+            logo_bytes = logo_path.read_bytes()
+        except OSError:
+            return None, None
+
+        logo_cid = "ambifo-logo"
+        logo_part = MIMEImage(logo_bytes)
+        logo_part.add_header("Content-ID", f"<{logo_cid}>")
+        logo_part.add_header("Content-Disposition", "inline", filename="ambifologo.png")
+        return logo_part, logo_cid
+
+    def _build_plain_text_fallback(self, html_body):
+        body = (html_body or "").strip()
+        if not body:
+            return "Ambifo CRM email"
+        # Keep simple fallback text for clients that prefer plain text.
+        return "This email contains HTML content. Please view in an HTML-compatible email client."
+
+    def _wrap_with_ambifo_branding(self, html_body, logo_src=None):
         base_url = self._get_effective_app_base_url()
-        logo_url = f"{base_url}/static/ambifologo.png"
+        logo_url = logo_src or f"{base_url}/static/ambifologo.png"
         body_html = html_body or ""
         company_address = "Building No 674, 18th Main, 3rd Phase, Front of New Land ISRO Quarter, Domlur, Bangalore - 560071"
         linkedin_url = "https://www.linkedin.com/company/ambifo-technology"
@@ -99,26 +169,39 @@ class EmailService:
                 error="SMTP host missing. Email not sent, but request was logged.",
             )
 
-        msg = MIMEMultipart("alternative")
+        sender_addr = self._get_sender_address(sender, username)
+        if not sender_addr:
+            return EmailResult(
+                success=False,
+                status="failed",
+                error="SMTP sender email is missing. Set SMTP Mail From or SMTP Username as a valid email.",
+            )
+
+        msg = MIMEMultipart("related")
+        alt_part = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = sender
+        msg["From"] = sender_addr
         msg["To"] = to_email
+        msg["Date"] = formatdate(localtime=True)
         cc_list = [e for e in (cc_emails or []) if e]
         bcc_list = [e for e in (bcc_emails or []) if e]
         if cc_list:
             msg["Cc"] = ", ".join(cc_list)
-        msg.attach(MIMEText(self._wrap_with_ambifo_branding(html_body), "html", "utf-8"))
+
+        logo_part, logo_cid = self._build_inline_logo_part()
+        logo_src = f"cid:{logo_cid}" if logo_cid else None
+        alt_part.attach(MIMEText(self._build_plain_text_fallback(html_body), "plain", "utf-8"))
+        alt_part.attach(MIMEText(self._wrap_with_ambifo_branding(html_body, logo_src=logo_src), "html", "utf-8"))
+        msg.attach(alt_part)
+        if logo_part is not None:
+            msg.attach(logo_part)
 
         try:
-            with smtplib.SMTP(host, port) as smtp:
-                smtp.ehlo()
-                if use_tls:
-                    smtp.starttls()
-                    smtp.ehlo()
+            with self._open_smtp_client(host, port, use_tls) as smtp:
                 if username and password:
                     smtp.login(username, password)
                 recipients = [to_email] + cc_list + bcc_list
-                smtp.sendmail(sender, recipients, msg.as_string())
+                smtp.sendmail(sender_addr, recipients, msg.as_string())
             return EmailResult(success=True, status="sent")
         except Exception as exc:
             return EmailResult(success=False, status="failed", error=str(exc))
@@ -136,11 +219,33 @@ class EmailService:
                 error="SMTP host missing. Email not sent, but request was logged.",
             )
 
-        msg = MIMEMultipart()
+        sender_addr = self._get_sender_address(sender, username)
+        if not sender_addr:
+            return EmailResult(
+                success=False,
+                status="failed",
+                error="SMTP sender email is missing. Set SMTP Mail From or SMTP Username as a valid email.",
+            )
+
+        # mixed(related(alternative(plain, html), inline-logo), attachment)
+        msg = MIMEMultipart("mixed")
+        related_part = MIMEMultipart("related")
+        alt_part = MIMEMultipart("alternative")
+
         msg["Subject"] = subject
-        msg["From"] = sender
+        msg["From"] = sender_addr
         msg["To"] = to_email
-        msg.attach(MIMEText(self._wrap_with_ambifo_branding(html_body), "html", "utf-8"))
+        msg["Date"] = formatdate(localtime=True)
+
+        logo_part, logo_cid = self._build_inline_logo_part()
+        logo_src = f"cid:{logo_cid}" if logo_cid else None
+
+        alt_part.attach(MIMEText(self._build_plain_text_fallback(html_body), "plain", "utf-8"))
+        alt_part.attach(MIMEText(self._wrap_with_ambifo_branding(html_body, logo_src=logo_src), "html", "utf-8"))
+        related_part.attach(alt_part)
+        if logo_part is not None:
+            related_part.attach(logo_part)
+        msg.attach(related_part)
 
         part = MIMEBase(*attachment_mime.split("/", 1))
         part.set_payload(attachment_bytes)
@@ -152,14 +257,10 @@ class EmailService:
         msg.attach(part)
 
         try:
-            with smtplib.SMTP(host, port) as smtp:
-                smtp.ehlo()
-                if use_tls:
-                    smtp.starttls()
-                    smtp.ehlo()
+            with self._open_smtp_client(host, port, use_tls) as smtp:
                 if username and password:
                     smtp.login(username, password)
-                smtp.sendmail(sender, [to_email], msg.as_string())
+                smtp.sendmail(sender_addr, [to_email], msg.as_string())
             return EmailResult(success=True, status="sent")
         except Exception as exc:
             return EmailResult(success=False, status="failed", error=str(exc))

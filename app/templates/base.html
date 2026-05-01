@@ -12,7 +12,7 @@
   <title>Ambifo CRM</title>
   <link rel="manifest" href="{{ url_for('manifest') }}">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='ambifologo.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v='20260501') }}">
 </head>
 <body>
   <header class="app-header">
@@ -27,7 +27,7 @@
       <nav>
         <a href="{{ url_for('crm.dashboard') }}">Dashboard</a>
         <a href="{{ url_for('crm.opportunity_list') }}">Opportunity</a>
-        <a href="{{ url_for('crm.template_list') }}">Email Template</a>
+        <a href="{{ url_for('crm.template_list') }}">Email</a>
         <a href="{{ url_for('crm.configuration') }}">Configuration</a>
       </nav>
       <button type="button" id="install-app-btn" class="btn install-app-btn" style="display:none; margin-right: 8px;">Install App</button>
@@ -54,10 +54,11 @@
   {% if current_user.is_authenticated %}
     <button type="button" id="install-app-btn-mobile" class="btn install-app-btn mobile-install-btn" style="display:none;" aria-label="Install app">Install App</button>
     <div class="mobile-quickbar" aria-label="Quick actions">
-      <a href="{{ url_for('crm.dashboard') }}">Dashboard</a>
-      <a href="{{ url_for('crm.opportunity_new') }}">+ Opportunity</a>
-      <a href="{{ url_for('crm.template_list') }}">Templates</a>
-      <a href="{{ url_for('crm.configuration') }}">Config</a>
+      <a href="{{ url_for('crm.dashboard') }}" aria-label="Dashboard" title="Dashboard"><span class="quick-icon">⌂</span><span class="sr-only">Dashboard</span></a>
+      <a href="{{ url_for('crm.opportunity_list', quick_add='1') }}" aria-label="Quick Add Opportunity" title="Quick Add Opportunity"><span class="quick-icon">＋</span><span class="sr-only">Quick Add Opportunity</span></a>
+      <a href="{{ url_for('crm.opportunity_list') }}" aria-label="Opportunity List" title="Opportunity List"><span class="quick-icon">☰</span><span class="sr-only">Opportunity List</span></a>
+      <a href="{{ url_for('crm.template_list') }}" aria-label="Email" title="Email"><span class="quick-icon">✉</span><span class="sr-only">Email</span></a>
+      <a href="{{ url_for('crm.configuration') }}" aria-label="Configuration" title="Configuration"><span class="quick-icon">⚙</span><span class="sr-only">Configuration</span></a>
     </div>
   {% endif %}
   <script src="{{ url_for('static', filename='js/pwa-install.js') }}"></script>

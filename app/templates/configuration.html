@@ -164,6 +164,122 @@
         {% endif %}
       </section>
 
+      <section class="panel config-card mobile-collapsible" id="email-template-config">
+        <h3>Email Templates</h3>
+        <p class="hint">Create and manage templates here. Email menu is now only for bulk/custom send and email history.</p>
+
+        <div class="hint" style="display:flex;flex-wrap:wrap;gap:6px 8px;margin-bottom:0.55rem;">
+          {% for macro in email_macro_catalog %}
+            <code>{{ macro }}</code>
+          {% endfor %}
+          <code>&#123;&#123;your_diagram_macro&#125;&#125;</code>
+        </div>
+
+        <form method="post" class="grid-form" style="margin-bottom:0.75rem;">
+          <input type="hidden" name="action" value="add_template">
+          <label>Template Name
+            <input name="name" required placeholder="e.g. Intro Email">
+          </label>
+          <label class="full">Subject Template
+            <input name="subject_template" required placeholder="Hello {{ '{{customer_name}}' }}">
+          </label>
+          <label class="full">Body Template (HTML supported)
+            <textarea name="body_template" rows="7" required placeholder="<p>Hello {{ '{{customer_name}}' }},</p>"></textarea>
+          </label>
+          <button class="btn" type="submit">Create Template</button>
+        </form>
+
+        <form method="post" class="grid-form" style="margin-bottom:0.75rem;">
+          <input type="hidden" name="action" value="test_email_template">
+          <label>Template
+            <select name="template_id" required>
+              <option value="">-- Select Template --</option>
+              {% for t in email_templates %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Test Recipient Email
+            <input type="email" name="test_email_to" placeholder="test@example.com" required>
+          </label>
+          <label>Opportunity Context (optional)
+            <select name="test_customer_id">
+              <option value="">-- None --</option>
+              {% for c in customers %}
+                <option value="{{ c.id }}">{{ c.customer_name }}{% if c.account_name %} ({{ c.account_name }}){% endif %}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="btn" type="submit">Send Template Test</button>
+        </form>
+
+        {% if email_templates %}
+          <div class="table-wrap">
+            <table class="tpl-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Subject</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for t in email_templates %}
+                  <tr>
+                    <td data-label="Name">
+                      {{ t.name }}
+                      {% if t.name in system_template_names %}
+                        <span class="badge-custom" style="margin-left:6px;">System</span>
+                      {% endif %}
+                    </td>
+                    <td data-label="Subject">{{ t.subject_template }}</td>
+                    <td data-label="Created">{{ t.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td data-label="Actions">
+                      <div class="actions-inline">
+                        <button class="mini-btn" type="button" onclick="toggleConfigTplEdit({{ t.id }})">Edit</button>
+                        {% if t.name in system_template_names %}
+                          <button class="mini-btn" type="button" disabled>Protected</button>
+                        {% else %}
+                          <form method="post" onsubmit="return confirm('Delete this template?');">
+                            <input type="hidden" name="action" value="delete_template">
+                            <input type="hidden" name="template_id" value="{{ t.id }}">
+                            <button class="mini-btn danger" type="submit">Delete</button>
+                          </form>
+                        {% endif %}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr id="cfg-tpl-edit-{{ t.id }}" style="display:none;">
+                    <td colspan="4" class="tpl-edit-cell">
+                      <form method="post" class="grid-form">
+                        <input type="hidden" name="action" value="edit_template">
+                        <input type="hidden" name="template_id" value="{{ t.id }}">
+                        <label>Template Name
+                          <input name="name" required value="{{ t.name }}">
+                        </label>
+                        <label class="full">Subject
+                          <input name="subject_template" required value="{{ t.subject_template }}">
+                        </label>
+                        <label class="full">Body (HTML supported)
+                          <textarea name="body_template" rows="7" required>{{ t.body_template }}</textarea>
+                        </label>
+                        <div class="tpl-form-actions">
+                          <button class="btn" type="submit">Update Template</button>
+                          <button class="btn btn-secondary" type="button" onclick="toggleConfigTplEdit({{ t.id }})">Cancel</button>
+                        </div>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="hint">No templates available yet.</p>
+        {% endif %}
+      </section>
+
       <section class="panel config-card mobile-collapsible" id="status-config">
         <h3>Status</h3>
         <form method="post" class="inline-form">
@@ -299,6 +415,7 @@
         <a href="#app-config">Application URL</a>
         <a href="#ai-config">AI Settings</a>
         <a href="#sow-master-config">Document Template</a>
+        <a href="#email-template-config">Email Templates</a>
         <a href="#status-config">Status</a>
         <a href="#segment-config">Segment</a>
         <a href="#cloud-config">Cloud Operators</a>
@@ -350,5 +467,16 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
 });
+
+function toggleConfigTplEdit(id) {
+  var targetId = 'cfg-tpl-edit-' + id;
+  var target = document.getElementById(targetId);
+  if (!target) return;
+  var show = target.style.display === 'none' || target.style.display === '';
+  document.querySelectorAll('[id^="cfg-tpl-edit-"]').forEach(function(row) {
+    row.style.display = 'none';
+  });
+  target.style.display = show ? 'table-row' : 'none';
+}
 </script>
 {% endblock %}

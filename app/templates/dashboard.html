@@ -1,93 +1,72 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="panel">
-  <div class="panel-head">
-    <h2>Dashboard</h2>
-    <div class="dashboard-filters">
-      <label>Range
-        <select id="dbPeriod" onchange="onPeriodChange()">
-          <option value="weekly">Weekly</option>
-          <option value="monthly" selected>Monthly</option>
-          <option value="quarterly">Quarterly</option>
-          <option value="yearly">Yearly</option>
-          <option value="custom">Custom</option>
-        </select>
-      </label>
-      <label id="dbStartWrap" style="display:none;">From
-        <input type="date" id="dbStart">
-      </label>
-      <label id="dbEndWrap" style="display:none;">To
-        <input type="date" id="dbEnd">
-      </label>
-      <button class="btn btn-sm" type="button" onclick="loadDashboardGraphs()">Apply</button>
+<section class="panel dashboard-panel">
+  <div class="panel-head dashboard-head">
+    <div class="dashboard-title-wrap">
+      <h2>Dashboard</h2>
+      <p class="dashboard-subtitle">Live opportunity insights with recent activity and meeting timeline.</p>
     </div>
   </div>
-  <p class="hint">Date filter applies to graphs only. History panel remains independent and uses tag filter.</p>
 
   <div class="dashboard-layout">
     <div class="dashboard-main">
-      <div class="dashboard-summary" id="dbSummary">Loading summary...</div>
+      <div class="dashboard-top-metrics">
+        <div class="dashboard-kpi-grid">
+          <div class="dashboard-kpi-card">
+            <span class="dashboard-kpi-label">Total Opportunities</span>
+            <strong id="dbKpiTotal">-</strong>
+          </div>
+          <div class="dashboard-kpi-card">
+            <span class="dashboard-kpi-label">From</span>
+            <strong id="dbKpiFrom">-</strong>
+          </div>
+          <div class="dashboard-kpi-card">
+            <span class="dashboard-kpi-label">To</span>
+            <strong id="dbKpiTo">-</strong>
+          </div>
+        </div>
+        <div class="dashboard-summary" id="dbSummary">Loading summary...</div>
+      </div>
       <div class="dashboard-charts-grid">
-        <div class="dashboard-chart-card">
-          <h4>Assigned User Wise</h4>
-          <div id="assignChart" class="db-chart-slot"></div>
-        </div>
-        <div class="dashboard-chart-card">
-          <h4>Segment Wise</h4>
-          <div id="segmentChart" class="db-chart-slot"></div>
-        </div>
-        <div class="dashboard-chart-card">
-          <h4>Status Wise</h4>
-          <div id="statusChart" class="db-chart-slot"></div>
-        </div>
-        <div class="dashboard-chart-card">
-          <h4>Country Wise</h4>
-          <div id="countryChart" class="db-chart-slot"></div>
-        </div>
-        <div class="dashboard-chart-card full">
-          <h4>City Wise</h4>
-          <div id="cityChart" class="db-chart-slot"></div>
+        <div class="dashboard-chart-card full dashboard-chart-card--unified">
+          <h4>Unified Opportunity Pie (Assigned, Segment, Status, Country)</h4>
+          <div id="unifiedInsightChart" class="db-chart-slot db-chart-slot--unified"></div>
         </div>
       </div>
     </div>
 
     <aside class="dashboard-side">
-      <div class="dashboard-side-head">
-        <h3>Chat History</h3>
-        <div class="dashboard-side-controls">
-          <select id="dbHistoryTag" onchange="loadDashboardHistory()">
-            <option value="important" selected>important</option>
-            <option value="all">all</option>
-            {% for t in update_tags %}
-              <option value="{{ t.name }}">{{ t.name }}</option>
-            {% endfor %}
-          </select>
-          <button class="btn btn-sm" type="button" onclick="loadDashboardHistory()">Refresh</button>
+      <details class="dashboard-collapsible">
+        <summary>Chat History</summary>
+        <div class="dashboard-side-head">
+          <div class="dashboard-side-controls">
+            <select id="dbHistoryTag" onchange="loadDashboardHistory()">
+              <option value="important" selected>important</option>
+              <option value="all">all</option>
+              {% for t in update_tags %}
+                <option value="{{ t.name }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-sm" type="button" onclick="loadDashboardHistory()">Refresh</button>
+          </div>
         </div>
-      </div>
-      <div id="dbHistoryList" class="dashboard-history-list">
-        <p class="hint">Loading updates...</p>
-      </div>
+        <div id="dbHistoryList" class="dashboard-history-list">
+          <p class="hint">Loading updates...</p>
+        </div>
+      </details>
 
-      <div class="dashboard-side-head" style="margin-top:0.85rem;">
-        <h3>Upcoming Meetings</h3>
-      </div>
-      <div id="dbUpcomingMeetingsList" class="dashboard-history-list" style="max-height:38vh;">
-        <p class="hint">Loading upcoming meetings...</p>
-      </div>
+      <details class="dashboard-collapsible" open>
+        <summary>Upcoming Meetings</summary>
+        <div id="dbUpcomingMeetingsList" class="dashboard-history-list dashboard-history-list--meetings">
+          <p class="hint">Loading upcoming meetings...</p>
+        </div>
+      </details>
     </aside>
   </div>
 </section>
 
 <script>
 var DB_COLORS = ['#2a9d8f','#4d96ff','#f4a259','#7c3aed','#be123c','#14b8a6','#d97706','#0ea5e9','#84cc16','#6b7280','#ef4444','#a855f7'];
-
-function onPeriodChange() {
-  var p = document.getElementById('dbPeriod').value;
-  var showCustom = p === 'custom';
-  document.getElementById('dbStartWrap').style.display = showCustom ? 'inline-flex' : 'none';
-  document.getElementById('dbEndWrap').style.display = showCustom ? 'inline-flex' : 'none';
-}
 
 function _renderPie(id, labels, values) {
   var root = document.getElementById(id);
@@ -154,31 +133,50 @@ function _renderBar(id, labels, values) {
   root.innerHTML = '<div class="db-bars">' + rows + '</div>';
 }
 
-function loadDashboardGraphs() {
-  var period = document.getElementById('dbPeriod').value;
-  var start = document.getElementById('dbStart').value;
-  var end = document.getElementById('dbEnd').value;
-  var qs = new URLSearchParams({ period: period });
-  if (period === 'custom') {
-    qs.set('start', start || '');
-    qs.set('end', end || '');
+function _appendMergedSeries(target, prefix, labels, values) {
+  for (var i = 0; i < labels.length; i++) {
+    var val = Number(values[i] || 0);
+    if (val <= 0) continue;
+    target.labels.push(prefix + ': ' + labels[i]);
+    target.values.push(val);
   }
+}
 
-  fetch('/dashboard/graph-data?' + qs.toString())
+function _renderUnifiedPie(id, payload) {
+  var merged = { labels: [], values: [] };
+  _appendMergedSeries(merged, 'Assigned', (payload.assign && payload.assign.labels) || [], (payload.assign && payload.assign.values) || []);
+  _appendMergedSeries(merged, 'Segment', (payload.segment && payload.segment.labels) || [], (payload.segment && payload.segment.values) || []);
+  _appendMergedSeries(merged, 'Status', (payload.status && payload.status.labels) || [], (payload.status && payload.status.values) || []);
+  _appendMergedSeries(merged, 'Country', (payload.country && payload.country.labels) || [], (payload.country && payload.country.values) || []);
+  _renderPie(id, merged.labels, merged.values);
+}
+
+function loadDashboardGraphs() {
+  fetch('/dashboard/graph-data')
     .then(function(r){ return r.json(); })
     .then(function(data){
       if (!data.success) return;
       var p = data.data;
+      var totalEl = document.getElementById('dbKpiTotal');
+      var fromEl = document.getElementById('dbKpiFrom');
+      var toEl = document.getElementById('dbKpiTo');
+
+      if (totalEl) totalEl.textContent = p.summary.total_opportunities;
+      if (fromEl) fromEl.textContent = p.summary.from;
+      if (toEl) toEl.textContent = p.summary.to;
+
       document.getElementById('dbSummary').textContent =
         'Total opportunities: ' + p.summary.total_opportunities + ' | Range: ' + p.summary.from + ' to ' + p.summary.to;
 
-      _renderPie('assignChart', p.assign.labels, p.assign.values);
-      _renderPie('segmentChart', p.segment.labels, p.segment.values);
-      _renderPie('statusChart', p.status.labels, p.status.values);
-      _renderPie('countryChart', p.country.labels, p.country.values);
-      _renderBar('cityChart', p.city.labels, p.city.values);
+      _renderUnifiedPie('unifiedInsightChart', p);
     })
     .catch(function(){
+      var totalEl = document.getElementById('dbKpiTotal');
+      var fromEl = document.getElementById('dbKpiFrom');
+      var toEl = document.getElementById('dbKpiTo');
+      if (totalEl) totalEl.textContent = '-';
+      if (fromEl) fromEl.textContent = '-';
+      if (toEl) toEl.textContent = '-';
       document.getElementById('dbSummary').textContent = 'Failed to load graph data.';
     });
 }
@@ -255,7 +253,6 @@ function escapeHtml(str) {
 }
 
 document.addEventListener('DOMContentLoaded', function(){
-  onPeriodChange();
   loadDashboardGraphs();
   loadDashboardHistory();
 });

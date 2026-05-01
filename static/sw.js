@@ -1,4 +1,4 @@
-const CACHE_NAME = "ambifo-crm-v1";
+const CACHE_NAME = "ambifo-crm-v2";
 const APP_SHELL = [
   "/",
   "/login",
@@ -33,9 +33,23 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const url = new URL(req.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isStaticAsset = isSameOrigin && url.pathname.startsWith("/static/");
+  const isAppShellAsset = isSameOrigin && (url.pathname === "/" || url.pathname === "/login" || url.pathname === "/manifest.webmanifest");
+
+  // Cache only static/app-shell resources. Keep dynamic pages/API network-first without SW cache writes.
+  if (!isStaticAsset && !isAppShellAsset) {
+    event.respondWith(fetch(req));
+    return;
+  }
+
   event.respondWith(
     fetch(req)
       .then((response) => {
+        if (!response || response.status !== 200) {
+          return response;
+        }
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
         return response;

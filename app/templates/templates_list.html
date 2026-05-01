@@ -1,179 +1,13 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% block content %}
 <section class="panel">
-  <h2>Email Templates</h2>
-  <p class="hint">Manage templates on the left. Use the right panel to send emails.</p>
+  <h2>Email Center</h2>
+  <p class="hint">Use this page only for sending emails and checking history. Manage templates from Configuration -> Email Templates.</p>
 
   <div class="config-layout">
     <div class="config-left">
 
-      <!-- ── Template List with Add / Edit / Delete ── -->
-      <section class="panel config-card" id="template-list">
-        <div class="tpl-list-head">
-          <h3>Email Templates</h3>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <label class="hint" for="templateTypeFilter" style="margin:0;">Filter</label>
-            <select id="templateTypeFilter" class="status-select" onchange="filterTemplateRows()" style="min-width:140px;">
-              <option value="all">All</option>
-              <option value="system">System</option>
-              <option value="custom">Custom</option>
-            </select>
-            <button class="btn btn-sm" onclick="toggleAddForm()" type="button">➕ Add Template</button>
-          </div>
-        </div>
-
-        {% if system_templates %}
-        <div class="hint" style="margin-bottom:0.7rem;padding:0.6rem 0.7rem;border:1px solid #dbeafe;background:#eff6ff;border-radius:8px;">
-          <strong>System Templates</strong>: These are used by built-in email flows (SMTP test, gathering, meeting, SOW). You can edit them, but deletion is disabled.
-          <div style="margin-top:0.4rem;display:flex;flex-wrap:wrap;gap:0.4rem;">
-            {% for st in system_templates %}
-              <span class="badge-custom">{{ st.name }}</span>
-            {% endfor %}
-          </div>
-        </div>
-        {% endif %}
-
-        <!-- Add Template (hidden by default) -->
-        <div id="addTemplateForm" class="tpl-inline-form" style="display:none;">
-          <h4>New Template</h4>
-          <p class="hint">Supported macros:</p>
-          <div class="hint" style="display:flex;flex-wrap:wrap;gap:6px 8px;margin-bottom:0.45rem;">
-            {% for macro in email_macro_catalog %}
-              <code>{{ macro }}</code>
-            {% endfor %}
-            <code>&#123;&#123;your_diagram_macro&#125;&#125;</code>
-          </div>
-          <p class="hint" style="margin-top:0;">Use Opportunity Macro Preview below to view customer-specific diagram macros.</p>
-          <div class="ce-block" style="margin-bottom:0.8rem;">
-            <p class="ce-label">Opportunity Macro Preview</p>
-            <label class="full">Select Opportunity
-              <select id="macroPreviewCustomer" onchange="renderDiagramMacroPreview()">
-                <option value="">-- Select Opportunity --</option>
-                {% for c in customers %}
-                  <option value="{{ c.id }}">{{ c.customer_name }}{% if c.account_name %} ({{ c.account_name }}){% endif %}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <div id="macroPreviewHint" class="hint" style="margin-top:0.45rem;">Select an opportunity to view active diagram macros.</div>
-            <div id="macroPreviewList" class="hint" style="margin-top:0.35rem;"></div>
-          </div>
-          <form method="post" class="grid-form">
-            <input type="hidden" name="action" value="add_template">
-            <label>Template Name<input id="addTemplateNameInput" name="name" required placeholder="e.g. Welcome Email"></label>
-            <label class="full">Subject<input id="addSubjectInput" name="subject_template" required placeholder="Hello &#123;&#123;customer_name&#125;&#125;"></label>
-            <label class="full">Body (HTML supported)
-              <span class="hint-inline">Header and footer are locked automatically. Edit only the email content block.</span>
-              <textarea id="addBodyTA" name="body_template" rows="8" required placeholder="<p>Dear &#123;&#123;customer_name&#125;&#125;,</p>"></textarea>
-            </label>
-            <div class="tpl-form-actions">
-              <button class="btn" type="button" id="aiEmailGenerateBtn" onclick="openTemplateAIModalForAdd()">AI Generate</button>
-              <button class="btn mobile-sticky-submit" type="submit">Save Template</button>
-              <button class="btn btn-secondary" type="button"
-                onclick="previewTemplate('addBodyTA', 'addSubjectInput')">👁 Preview</button>
-              <button class="btn btn-secondary" type="button" onclick="toggleAddForm()">Cancel</button>
-            </div>
-          </form>
-        </div>
-
-        <!-- Template table -->
-        {% if tpl_pagination.items %}
-        <div class="table-wrap">
-          <table class="tpl-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Subject</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-            {% for t in tpl_pagination.items %}
-              <tr id="tpl-row-{{ t.id }}" data-template-type="{% if t.name in system_template_names %}system{% else %}custom{% endif %}">
-                <td data-label="Name">
-                  {{ t.name }}
-                  {% if t.name in system_template_names %}
-                    <span class="badge-custom" style="margin-left:6px;">System</span>
-                  {% endif %}
-                </td>
-                <td data-label="Subject">{{ t.subject_template }}</td>
-                <td data-label="Created">{{ t.created_at.strftime('%Y-%m-%d') }}</td>
-                <td data-label="Actions">
-                  <div class="actions-inline">
-                    <button class="mini-btn" type="button"
-                      onclick="toggleEditForm({{ t.id }})" title="Edit">✏️ Edit</button>
-                    {% if t.name in system_template_names %}
-                      <button class="mini-btn" type="button" disabled title="System templates cannot be deleted">🔒 Protected</button>
-                    {% else %}
-                      <form method="post" onsubmit="return confirm('Delete template &quot;{{ t.name }}&quot;?');" style="display:inline;">
-                        <input type="hidden" name="action" value="delete_template">
-                        <input type="hidden" name="template_id" value="{{ t.id }}">
-                        <button class="mini-btn danger" type="submit" title="Delete">🗑️ Delete</button>
-                      </form>
-                    {% endif %}
-                  </div>
-                </td>
-              </tr>
-              <!-- Inline Edit Row -->
-              <tr id="tpl-edit-{{ t.id }}" style="display:none;" data-template-type="{% if t.name in system_template_names %}system{% else %}custom{% endif %}">
-                <td colspan="4" class="tpl-edit-cell">
-                  <form method="post" class="grid-form">
-                    <input type="hidden" name="action" value="edit_template">
-                    <input type="hidden" name="template_id" value="{{ t.id }}">
-                    <p class="hint full" style="margin-bottom:0.2rem;">Supported macros:</p>
-                    <div class="hint full" style="display:flex;flex-wrap:wrap;gap:6px 8px;margin-bottom:0.55rem;">
-                      {% for macro in email_macro_catalog %}
-                        <code>{{ macro }}</code>
-                      {% endfor %}
-                      <code>&#123;&#123;your_diagram_macro&#125;&#125;</code>
-                    </div>
-                    <label>Template Name
-                      <input name="name" required value="{{ t.name }}">
-                    </label>
-                    <label class="full">Subject
-                      <input id="editSubject-{{ t.id }}" name="subject_template" required value="{{ t.subject_template }}">
-                    </label>
-                    <label class="full">Body (HTML supported)
-                      <span class="hint-inline">Header and footer are locked automatically. Edit only the email content block.</span>
-                      <textarea id="editBody-{{ t.id }}" name="body_template" rows="8" required>{{ t.body_template }}</textarea>
-                    </label>
-                    <div class="tpl-form-actions">
-                      <button class="btn" type="button" onclick="openTemplateAIModalForEdit({{ t.id }})">AI Generate</button>
-                      <button class="btn mobile-sticky-submit" type="submit">Update Template</button>
-                      <button class="btn btn-secondary" type="button"
-                        onclick="previewTemplate('editBody-{{ t.id }}', 'editSubject-{{ t.id }}')">👁 Preview</button>
-                      <button class="btn btn-secondary" type="button"
-                        onclick="toggleEditForm({{ t.id }})">Cancel</button>
-                    </div>
-                  </form>
-                </td>
-              </tr>
-            {% endfor %}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Template pagination -->
-        <div class="pagination">
-          {% if tpl_pagination.has_prev %}
-            <a class="page-link" href="{{ url_for('crm.template_list', tpl_page=tpl_pagination.prev_num) }}#template-list">Previous</a>
-          {% else %}
-            <span class="page-link disabled">Previous</span>
-          {% endif %}
-          <span>Page {{ tpl_pagination.page }} of {{ tpl_pagination.pages }}</span>
-          {% if tpl_pagination.has_next %}
-            <a class="page-link" href="{{ url_for('crm.template_list', tpl_page=tpl_pagination.next_num) }}#template-list">Next</a>
-          {% else %}
-            <span class="page-link disabled">Next</span>
-          {% endif %}
-        </div>
-        {% else %}
-          <p class="hint">No templates yet. Click <strong>Add Template</strong> above to create one.</p>
-        {% endif %}
-      </section>
-
-      <!-- ── Send Bulk Email ────────────────────────── -->
-      <section class="panel config-card mobile-collapsible" id="send-bulk">
+      <section class="panel config-card mobile-collapsible expanded" id="send-bulk">
         <h3>Send Bulk Email</h3>
         <p class="hint">Select a template and send it to <strong>all customers</strong> with a valid email address. Macros are personalised per recipient.</p>
         <form method="post" class="grid-form" onsubmit="return confirm('Send this template to ALL customers? This cannot be undone.');">
@@ -186,38 +20,34 @@
               {% endfor %}
             </select>
           </label>
+          <a class="btn btn-secondary" href="{{ url_for('crm.configuration') }}#email-template-config">Manage Templates</a>
           {% if all_templates %}
             <button class="btn mobile-sticky-submit" type="submit">Send to All Customers</button>
           {% else %}
-            <p class="hint">Create a template first.</p>
+            <p class="hint">Create templates first from Configuration.</p>
           {% endif %}
         </form>
       </section>
 
-      <!-- ── Send Custom Email ──────────────────────── -->
       <section class="panel config-card mobile-collapsible" id="send-custom">
         <h3>Send Custom Email</h3>
 
         <form method="post" id="customEmailForm" class="grid-form">
           <input type="hidden" name="action" value="send_custom_email">
 
-          <!-- ① Email Content ─────────────────────────── -->
           <div class="full ce-block">
-            <p class="ce-label">① Email Content</p>
+            <p class="ce-label">1. Email Content</p>
             <div class="ce-tabs">
               <label class="ce-tab">
-                <input type="radio" name="email_source" value="template" checked
-                  onchange="toggleEmailSource('template')">
+                <input type="radio" name="email_source" value="template" checked onchange="toggleEmailSource('template')">
                 Use a Template
               </label>
               <label class="ce-tab">
-                <input type="radio" name="email_source" value="custom"
-                  onchange="toggleEmailSource('custom')">
+                <input type="radio" name="email_source" value="custom" onchange="toggleEmailSource('custom')">
                 Write Custom Email
               </label>
             </div>
 
-            <!-- Template picker -->
             <div id="ceSourceTemplate" class="ce-sub">
               <label>Template
                 <select name="template_id">
@@ -229,7 +59,6 @@
               </label>
             </div>
 
-            <!-- Custom composer -->
             <div id="ceSourceCustom" class="ce-sub" style="display:none;">
               <label class="full">Subject
                 <input name="custom_subject" placeholder="Email subject line">
@@ -240,31 +69,25 @@
             </div>
           </div>
 
-          <!-- ② Recipients ─────────────────────────────── -->
           <div class="full ce-block">
-            <p class="ce-label">② Recipients</p>
+            <p class="ce-label">2. Recipients</p>
             <div class="ce-tabs">
               <label class="ce-tab">
-                <input type="radio" name="recipient_mode" value="status"
-                  onchange="switchRecipient('status')"> By Status
+                <input type="radio" name="recipient_mode" value="status" onchange="switchRecipient('status')"> By Status
               </label>
               <label class="ce-tab">
-                <input type="radio" name="recipient_mode" value="segment"
-                  onchange="switchRecipient('segment')"> By Segment
+                <input type="radio" name="recipient_mode" value="segment" onchange="switchRecipient('segment')"> By Segment
               </label>
               <label class="ce-tab">
-                <input type="radio" name="recipient_mode" value="select"
-                  onchange="switchRecipient('select')"> Select Customers
+                <input type="radio" name="recipient_mode" value="select" onchange="switchRecipient('select')"> Select Customers
               </label>
               <label class="ce-tab">
-                <input type="radio" name="recipient_mode" value="manual_email"
-                  onchange="switchRecipient('manual_email')"> Email Address
+                <input type="radio" name="recipient_mode" value="manual_email" onchange="switchRecipient('manual_email')"> Email Address
               </label>
             </div>
 
-            <!-- Option 1: By Status -->
             <div id="ceRecipStatus" class="ce-sub" style="display:none;">
-              <label>Status — all customers with this status will receive the email
+              <label>Status
                 <select name="filter_status">
                   <option value="">-- Select Status --</option>
                   {% for s in statuses %}
@@ -274,9 +97,8 @@
               </label>
             </div>
 
-            <!-- Option 2: By Segment -->
             <div id="ceRecipSegment" class="ce-sub" style="display:none;">
-              <label>Segment — all customers in this segment will receive the email
+              <label>Segment
                 <select name="filter_segment">
                   <option value="">-- Select Segment --</option>
                   {% for seg in segments %}
@@ -286,18 +108,14 @@
               </label>
             </div>
 
-            <!-- Option 3: Select Customers (JS paginated) -->
             <div id="ceRecipSelect" class="ce-sub" style="display:none;">
               <div class="ce-cust-toolbar">
-                <input id="custSearch" type="text" placeholder="Search by name or email…"
-                  oninput="filterCustomers()" class="ce-search">
+                <input id="custSearch" type="text" placeholder="Search by name or email..." oninput="filterCustomers()" class="ce-search">
                 <span id="custCount" class="hint-inline"></span>
               </div>
               <div id="ceCustomerList" class="ce-customer-list">
                 {% for c in customers %}
-                  <label class="ce-customer-item"
-                    data-name="{{ c.customer_name | lower }}"
-                    data-email="{{ (c.email or '') | lower }}">
+                  <label class="ce-customer-item" data-name="{{ c.customer_name | lower }}" data-email="{{ (c.email or '') | lower }}">
                     <input type="checkbox" name="selected_customers" value="{{ c.id }}">
                     {{ c.customer_name }}
                     <span class="hint-inline">({{ c.email or 'no email' }})</span>
@@ -306,7 +124,6 @@
                   <p class="hint">No customers found.</p>
                 {% endfor %}
               </div>
-              <!-- Customer pagination -->
               <div class="pagination" id="custPagination" style="margin-top:0.5rem;">
                 <button class="page-link" type="button" id="custPrev" onclick="changeCustPage(-1)">Previous</button>
                 <span id="custPageInfo"></span>
@@ -314,12 +131,11 @@
               </div>
             </div>
 
-            <!-- Option 4: Manual Email -->
             <div id="ceRecipManual" class="ce-sub" style="display:none;">
               <label>Email Address
                 <input type="email" name="manual_email" placeholder="someone@example.com">
               </label>
-              <p class="hint">Macros will not be applied when sending to a manual address.</p>
+              <p class="hint">Macros are not applied when sending to a manual address.</p>
             </div>
           </div>
 
@@ -329,7 +145,6 @@
         </form>
       </section>
 
-      <!-- ── Email History ──────────────────────────── -->
       <section class="panel config-card" id="email-history">
         <h3>Email History</h3>
         {% if history_pagination.items %}
@@ -351,35 +166,21 @@
             {% for log in history_pagination.items %}
               <tr>
                 <td data-label="Date" style="white-space:nowrap;">{{ log.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td data-label="Customer">
-                  {% if log.customer %}
-                    {{ log.customer.customer_name }}
-                  {% else %}
-                    <span class="hint-inline">—</span>
-                  {% endif %}
-                </td>
-                <td data-label="Recipient">{{ log.recipient_email or (log.customer.email if log.customer else '—') }}</td>
-                <td data-label="Template">
-                  {% if log.template %}
-                    {{ log.template.name }}
-                  {% else %}
-                    <span class="badge-custom">Custom Email</span>
-                  {% endif %}
-                </td>
+                <td data-label="Customer">{% if log.customer %}{{ log.customer.customer_name }}{% else %}<span class="hint-inline">-</span>{% endif %}</td>
+                <td data-label="Recipient">{{ log.recipient_email or (log.customer.email if log.customer else '-') }}</td>
+                <td data-label="Template">{% if log.template %}{{ log.template.name }}{% else %}<span class="badge-custom">Custom Email</span>{% endif %}</td>
                 <td data-label="Subject">{{ log.subject }}</td>
-                <td data-label="Type">
-                  <span class="badge-type badge-type-{{ log.email_type }}">{{ log.email_type | title }}</span>
-                </td>
+                <td data-label="Type"><span class="badge-type badge-type-{{ log.email_type }}">{{ log.email_type | title }}</span></td>
                 <td data-label="Status">
                   {% if log.status in ('sent', 'dev-mode') %}
-                    <span class="badge-status badge-ok">✔ {{ log.status }}</span>
+                    <span class="badge-status badge-ok">OK {{ log.status }}</span>
                   {% else %}
-                    <span class="badge-status badge-fail" title="{{ log.error_message or '' }}">✖ {{ log.status }}</span>
+                    <span class="badge-status badge-fail" title="{{ log.error_message or '' }}">FAIL {{ log.status }}</span>
                   {% endif %}
                 </td>
                 <td data-label="Action">
                   <form method="post" action="{{ url_for('crm.email_resend', log_id=log.id) }}">
-                    <button class="mini-btn" type="submit" title="Resend">🔁 Resend</button>
+                    <button class="mini-btn" type="submit" title="Resend">Resend</button>
                   </form>
                 </td>
               </tr>
@@ -388,7 +189,6 @@
           </table>
         </div>
 
-        <!-- History pagination -->
         <div class="pagination">
           {% if history_pagination.has_prev %}
             <a class="page-link" href="{{ url_for('crm.template_list', hist_page=history_pagination.prev_num) }}#email-history">Previous</a>
@@ -407,14 +207,15 @@
         {% endif %}
       </section>
 
-    </div><!-- /.config-left -->
+    </div>
 
     <aside class="panel config-right">
       <h3>Email Actions</h3>
       <div class="config-links">
-        <a href="#send-bulk">📨 Send Bulk Email</a>
-        <a href="#send-custom">✉️ Send Custom Email</a>
-        <a href="#email-history">🕐 Email History</a>
+        <a href="#send-bulk">Send Bulk Email</a>
+        <a href="#send-custom">Send Custom Email</a>
+        <a href="#email-history">Email History</a>
+        <a href="{{ url_for('crm.configuration') }}#email-template-config">Manage Templates</a>
       </div>
     </aside>
 
@@ -422,63 +223,33 @@
 </section>
 
 <script>
-  /* ── Template table ── */
-  function toggleAddForm() {
-    var el = document.getElementById('addTemplateForm');
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-  }
-
-  function toggleEditForm(id) {
-    var editRow = document.getElementById('tpl-edit-' + id);
-    var isHidden = editRow.style.display === 'none';
-    document.querySelectorAll('[id^="tpl-edit-"]').forEach(function(r) {
-      r.style.display = 'none';
-    });
-    editRow.style.display = isHidden ? 'table-row' : 'none';
-  }
-
-  function filterTemplateRows() {
-    var filter = (document.getElementById('templateTypeFilter')?.value || 'all');
-    var rows = Array.from(document.querySelectorAll('tr[id^="tpl-row-"]'));
-    rows.forEach(function(row) {
-      var type = row.getAttribute('data-template-type') || 'custom';
-      var show = filter === 'all' || filter === type;
-      row.style.display = show ? '' : 'none';
-
-      var editId = row.id.replace('tpl-row-', 'tpl-edit-');
-      var editRow = document.getElementById(editId);
-      if (!show && editRow) {
-        editRow.style.display = 'none';
-      }
-    });
-  }
-
-  /* ── Custom email: content source ── */
   function toggleEmailSource(mode) {
-    document.getElementById('ceSourceTemplate').style.display = mode === 'template' ? 'block' : 'none';
-    document.getElementById('ceSourceCustom').style.display  = mode === 'custom'   ? 'block' : 'none';
+    var templateWrap = document.getElementById('ceSourceTemplate');
+    var customWrap = document.getElementById('ceSourceCustom');
+    if (templateWrap) templateWrap.style.display = mode === 'template' ? 'block' : 'none';
+    if (customWrap) customWrap.style.display = mode === 'custom' ? 'block' : 'none';
   }
 
-  /* ── Custom email: recipient mode ── */
   var recipPanels = {
-    status:       'ceRecipStatus',
-    segment:      'ceRecipSegment',
-    select:       'ceRecipSelect',
+    status: 'ceRecipStatus',
+    segment: 'ceRecipSegment',
+    select: 'ceRecipSelect',
     manual_email: 'ceRecipManual',
   };
 
   function switchRecipient(mode) {
-    Object.values(recipPanels).forEach(function(id) {
-      document.getElementById(id).style.display = 'none';
+    Object.keys(recipPanels).forEach(function(key) {
+      var el = document.getElementById(recipPanels[key]);
+      if (el) el.style.display = 'none';
     });
     if (recipPanels[mode]) {
-      document.getElementById(recipPanels[mode]).style.display = 'block';
+      var target = document.getElementById(recipPanels[mode]);
+      if (target) target.style.display = 'block';
     }
   }
 
-  /* ── Customer list: search + JS pagination ── */
-  var _custPage     = 1;
-  var _custPerPage  = 10;
+  var _custPage = 1;
+  var _custPerPage = 10;
   var _custFiltered = [];
 
   function getAllItems() {
@@ -501,15 +272,20 @@
     var pages = Math.max(1, Math.ceil(total / _custPerPage));
     if (_custPage > pages) _custPage = pages;
     var start = (_custPage - 1) * _custPerPage;
-    var end   = start + _custPerPage;
+    var end = start + _custPerPage;
 
     getAllItems().forEach(function(el) { el.style.display = 'none'; });
     items.slice(start, end).forEach(function(el) { el.style.display = 'flex'; });
 
-    document.getElementById('custPageInfo').textContent = 'Page ' + _custPage + ' of ' + pages + ' (' + total + ' customers)';
-    document.getElementById('custPrev').disabled = _custPage <= 1;
-    document.getElementById('custNext').disabled = _custPage >= pages;
-    document.getElementById('custCount').textContent = total + ' shown';
+    var info = document.getElementById('custPageInfo');
+    var prev = document.getElementById('custPrev');
+    var next = document.getElementById('custNext');
+    var count = document.getElementById('custCount');
+
+    if (info) info.textContent = 'Page ' + _custPage + ' of ' + pages + ' (' + total + ' customers)';
+    if (prev) prev.disabled = _custPage <= 1;
+    if (next) next.disabled = _custPage >= pages;
+    if (count) count.textContent = total + ' shown';
   }
 
   function changeCustPage(delta) {
@@ -517,182 +293,9 @@
     renderCustPage();
   }
 
-  const DIAGRAM_MACRO_MAP = {{ diagram_macro_map | tojson }};
-  const BASE_TEMPLATE_MACROS = {{ email_macro_catalog | tojson }};
-
-  function renderDiagramMacroPreview() {
-    var select = document.getElementById('macroPreviewCustomer');
-    var list = document.getElementById('macroPreviewList');
-    var hint = document.getElementById('macroPreviewHint');
-    if (!select || !list || !hint) return;
-
-    var customerId = (select.value || '').trim();
-    if (!customerId) {
-      hint.textContent = 'Select an opportunity to view active diagram macros.';
-      list.innerHTML = '';
-      return;
-    }
-
-    var macros = DIAGRAM_MACRO_MAP[customerId] || [];
-    if (!macros.length) {
-      hint.textContent = 'No active diagram macros found for this opportunity.';
-      list.innerHTML = '';
-      return;
-    }
-
-    hint.textContent = 'Use these macros in subject/body for this opportunity context:';
-    var html = '<ul style="margin:0.25rem 0 0 1rem;">';
-    macros.forEach(function(item) {
-      html += '<li><code>{{' + item.macro_key + '}}</code> - ' + (item.diagram_name || 'Diagram') + '</li>';
-    });
-    html += '<li><code>{{selected_diagrams_html}}</code> - includes all active diagrams for the selected opportunity</li>';
-    html += '</ul>';
-    list.innerHTML = html;
-  }
-
-  function closeTemplateAIModal() {
-    var modal = document.getElementById('templateAiModal');
-    if (!modal) return;
-    modal.style.display = 'none';
-    document.body.style.overflow = '';
-  }
-
-  function openTemplateAIModalForAdd() {
-    openTemplateAIModal({
-      mode: 'add',
-      nameInputId: 'addTemplateNameInput',
-      subjectInputId: 'addSubjectInput',
-      bodyInputId: 'addBodyTA',
-    });
-  }
-
-  function openTemplateAIModalForEdit(templateId) {
-    openTemplateAIModal({
-      mode: 'edit',
-      nameInputId: null,
-      subjectInputId: 'editSubject-' + templateId,
-      bodyInputId: 'editBody-' + templateId,
-    });
-  }
-
-  function openTemplateAIModal(opts) {
-    var modal = document.getElementById('templateAiModal');
-    if (!modal) return;
-
-    var mode = opts.mode || 'add';
-    var nameEl = opts.nameInputId ? document.getElementById(opts.nameInputId) : null;
-    var subjectEl = document.getElementById(opts.subjectInputId);
-    var bodyEl = document.getElementById(opts.bodyInputId);
-    if (!subjectEl || !bodyEl) return;
-
-    document.getElementById('aiModalMode').value = mode;
-    document.getElementById('aiModalNameInputId').value = opts.nameInputId || '';
-    document.getElementById('aiModalSubjectInputId').value = opts.subjectInputId;
-    document.getElementById('aiModalBodyInputId').value = opts.bodyInputId;
-
-    document.getElementById('aiCurrentTemplateName').textContent = nameEl ? (nameEl.value || '(new template)') : '(editing existing template)';
-    document.getElementById('aiCurrentSubject').value = subjectEl.value || '';
-    document.getElementById('aiCurrentBody').value = bodyEl.value || '';
-
-    var selectedOpp = (document.getElementById('macroPreviewCustomer')?.value || '').trim();
-    var aiOppSelect = document.getElementById('aiPromptCustomer');
-    if (aiOppSelect) {
-      aiOppSelect.value = selectedOpp;
-      renderAIMacroContext();
-    }
-
-    modal.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-  }
-
-  function getSelectedMacrosForAI(customerId) {
-    var macros = BASE_TEMPLATE_MACROS.slice();
-    var diagrams = DIAGRAM_MACRO_MAP[customerId] || [];
-    diagrams.forEach(function(item) {
-      if ((item.macro_key || '').trim()) {
-        macros.push('{{' + item.macro_key.trim() + '}}');
-      }
-    });
-    return macros;
-  }
-
-  function renderAIMacroContext() {
-    var select = document.getElementById('aiPromptCustomer');
-    var target = document.getElementById('aiMacroList');
-    if (!select || !target) return;
-    var customerId = (select.value || '').trim();
-    var macros = getSelectedMacrosForAI(customerId);
-    target.textContent = macros.join(', ');
-  }
-
-  async function submitTemplateAIGeneration() {
-    var btn = document.getElementById('aiModalGenerateBtn');
-    if (!btn) return;
-
-    var nameInputId = document.getElementById('aiModalNameInputId').value;
-    var subjectInputId = document.getElementById('aiModalSubjectInputId').value;
-    var bodyInputId = document.getElementById('aiModalBodyInputId').value;
-    var nameEl = nameInputId ? document.getElementById(nameInputId) : null;
-    var subjectEl = document.getElementById(subjectInputId);
-    var bodyEl = document.getElementById(bodyInputId);
-    if (!subjectEl || !bodyEl) {
-      alert('Template fields were not found. Please reopen AI Generate.');
-      return;
-    }
-
-    var objective = (document.getElementById('aiPromptObjective').value || '').trim();
-    var tone = (document.getElementById('aiPromptTone').value || 'professional').trim();
-    var promptDetails = (document.getElementById('aiPromptDetails').value || '').trim();
-    var keepSubjectUnchanged = !!document.getElementById('aiKeepSubjectCheckbox')?.checked;
-    var customerId = (document.getElementById('aiPromptCustomer').value || '').trim();
-    var customerLabel = '';
-    var option = document.querySelector('#aiPromptCustomer option[value="' + customerId + '"]');
-    if (option) customerLabel = option.textContent || '';
-    var availableMacros = getSelectedMacrosForAI(customerId);
-
-    btn.disabled = true;
-    btn.textContent = 'Generating...';
-    try {
-      var response = await fetch('/ai/generate/email-template', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          objective: objective,
-          tone: tone,
-          business_context: promptDetails,
-          current_subject: subjectEl.value || '',
-          current_body: bodyEl.value || '',
-          current_template_name: nameEl ? (nameEl.value || '') : '',
-          selected_opportunity: customerLabel,
-          available_macros: availableMacros,
-          preserve_subject: keepSubjectUnchanged,
-        })
-      });
-      var data = await response.json();
-      if (!response.ok || !data.success) {
-        alert(data.message || 'AI generation failed.');
-        return;
-      }
-
-      if (nameEl && data.template_name) nameEl.value = data.template_name;
-      if (!keepSubjectUnchanged && data.subject_template) subjectEl.value = data.subject_template;
-      if (data.body_template) bodyEl.value = data.body_template;
-      closeTemplateAIModal();
-      alert('Template generated. Use Preview to validate, then Save/Update template.');
-    } catch (err) {
-      alert('AI request failed. Check AI settings in Configuration.');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Generate Template';
-    }
-  }
-
-  /* Init customer list when "Select Customers" tab is first shown */
   document.addEventListener('DOMContentLoaded', function() {
     _custFiltered = getAllItems();
     renderCustPage();
-    renderDiagramMacroPreview();
-    renderAIMacroContext();
 
     if (window.innerWidth <= 760) {
       document.querySelectorAll('.mobile-collapsible > h3').forEach(function(title) {
@@ -704,207 +307,5 @@
       });
     }
   });
-
-  /* ── Template Preview ───────────────────────────── */
-  {% raw %}
-  var _SAMPLE = {
-    '{{customer_name}}':        'Acme Corporation',
-    '{{account_name}}':         'Acme Corp Account',
-    '{{email}}':                'contact@acme.example.com',
-    '{{phone}}':                '+1 555-123-4567',
-    '{{city}}':                 'Mumbai',
-    '{{today}}':                new Date().toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'}),
-    '{{gathering_form_link}}':  'https://example.com/gathering/form/SAMPLETOKEN',
-    '{{gathering_access_key}}': 'ABCD1234',
-    '{{gathering_expires_at}}': '2026-05-10 12:00 UTC',
-    '{{note}}':                 '(your note to the customer)',
-    '{{opportunity_id}}':       'OPP-0042',
-    '{{deal_status}}':          'In Progress',
-    '{{segment}}':              'Enterprise',
-  };
-  {% endraw %}
-
-  function _applyMacros(text) {
-    Object.keys(_SAMPLE).forEach(function(k) {
-      text = text.split(k).join(_SAMPLE[k]);
-    });
-    return text;
-  }
-
-  function _wrapWithAmbifoBrandingForPreview(bodyHtml) {
-    var baseUrl = window.location.origin || '';
-    var logoUrl = baseUrl + '/static/ambifologo.png';
-    return ''
-      + '<div style="background:#f5f7fb;padding:18px 12px;">'
-      + '  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:700px;margin:0 auto;background:#ffffff;border:1px solid #e7ecf3;border-radius:10px;overflow:hidden;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">'
-      + '    <tr><td style="padding:16px 20px;border-bottom:1px solid #dbe7f6;background:linear-gradient(135deg,#f8fbff 0%,#ecf4ff 100%);text-align:center;">'
-      + '      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td style="vertical-align:middle;text-align:center;">'
-      + '        <img src="' + logoUrl + '" alt="Ambifo" style="height:42px;max-width:220px;display:block;margin:0 auto;">'
-      + '        <div style="margin-top:8px;font-size:13px;font-weight:700;color:#0f2f5f;letter-spacing:0.02em;">AMBIFO TECHNOLOGY PVT LTD</div>'
-      + '        <div style="margin-top:6px;font-size:11px;color:#315b92;line-height:1.5;">'
-      + '          <span style="display:inline-block;padding:2px 8px;border:1px solid #b9d1f2;border-radius:999px;background:#ffffff;margin-right:6px;">Cloud Strategy</span>'
-      + '          <span style="display:inline-block;padding:2px 8px;border:1px solid #b9d1f2;border-radius:999px;background:#ffffff;margin-right:6px;">Migration &amp; Modernization</span>'
-      + '          <span style="display:inline-block;padding:2px 8px;border:1px solid #b9d1f2;border-radius:999px;background:#ffffff;margin-right:6px;">DevOps</span>'
-      + '          <span style="display:inline-block;padding:2px 8px;border:1px solid #b9d1f2;border-radius:999px;background:#ffffff;">AI/ML</span>'
-      + '        </div>'
-      + '      </td></tr></table>'
-      + '    </td></tr>'
-      + '    <tr><td style="padding:20px;line-height:1.6;font-size:14px;">' + (bodyHtml || '') + '</td></tr>'
-      + '    <tr><td style="padding:16px 20px;border-top:1px solid #edf2f7;background:#fbfcfe;font-size:13px;line-height:1.75;color:#1f2937;">'
-      + '      <div><strong>Website:</strong> <a href="https://www.ambifo.com" style="color:#0f4fa8;text-decoration:none;">www.ambifo.com</a></div>'
-      + '      <div><strong>Email:</strong> <a href="mailto:support@ambifo.com" style="color:#0f4fa8;text-decoration:none;">support@ambifo.com</a></div>'
-      + '      <div><strong>Phone:</strong> +91 9148419502</div>'
-      + '      <div><strong>Address:</strong> Building No 674, 18th Main, 3rd Phase, Front of New Land ISRO Quarter, Domlur, Bangalore - 560071</div>'
-      + '      <div style="margin-top:8px;"><a href="https://www.linkedin.com/company/ambifo-technology" target="_blank" rel="noopener" title="LinkedIn" aria-label="LinkedIn" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:#0a66c2;color:#ffffff;text-decoration:none;font-weight:700;font-size:13px;line-height:1;">in</a></div>'
-      + '    </td></tr>'
-      + '  </table>'
-      + '</div>';
-  }
-
-  function _stripLockedFooterFromEditorContent(bodyHtml) {
-    var content = bodyHtml || '';
-    function _escapeRegExp(s) {
-      return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-    var markers = ['support@ambifo.com', 'https://ambifo.com', 'www.linkedin.com/company/ambifo-technology', '+91 9148419502', 'Building No 674'];
-    markers.forEach(function(marker) {
-      var blockPattern = new RegExp('<(p|div|span|li)[^>]*>[\\s\\S]*?' + _escapeRegExp(marker) + '[\\s\\S]*?<\\/\\1>', 'gi');
-      content = content.replace(blockPattern, '');
-    });
-    content = content.replace(/<footer[\s\S]*?<\/footer>/gi, '');
-    return content;
-  }
-
-  function previewTemplate(bodyId, subjectId) {
-    var bodyEl    = document.getElementById(bodyId);
-    var subjectEl = subjectId ? document.getElementById(subjectId) : null;
-    if (!bodyEl) return;
-
-    var subject = _applyMacros(subjectEl ? (subjectEl.value || '') : '');
-    var body    = _applyMacros(_stripLockedFooterFromEditorContent(bodyEl.value || ''));
-    body = _wrapWithAmbifoBrandingForPreview(body);
-
-    var doc = '<!DOCTYPE html><html><head><meta charset="utf-8">'
-      + '<style>body{font-family:Arial,sans-serif;font-size:14px;color:#222;padding:24px 32px;max-width:680px;margin:0 auto;line-height:1.6;}'
-      + 'a{color:#1a6fcc;}img{max-width:100%;}</style></head><body>' + body + '</body></html>';
-
-    document.getElementById('tplPreviewSubject').textContent = subject || '(no subject)';
-    document.getElementById('tplPreviewModal').style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-
-    requestAnimationFrame(function() {
-      var iframe = document.getElementById('tplPreviewFrame');
-      var iDoc = iframe.contentDocument || iframe.contentWindow.document;
-      iDoc.open();
-      iDoc.write(doc);
-      iDoc.close();
-    });
-  }
-
-  function closeTplPreview() {
-    document.getElementById('tplPreviewModal').style.display = 'none';
-    document.body.style.overflow = '';
-    var iframe = document.getElementById('tplPreviewFrame');
-    var iDoc = iframe.contentDocument || iframe.contentWindow.document;
-    iDoc.open(); iDoc.write(''); iDoc.close();
-  }
-
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-      closeTplPreview();
-      closeTemplateAIModal();
-    }
-  });
 </script>
-
-<div id="templateAiModal"
-  style="display:none;position:fixed;inset:0;z-index:2100;background:rgba(0,0,0,.55);align-items:center;justify-content:center;"
-  onclick="if(event.target===this)closeTemplateAIModal()">
-  <div style="background:#fff;border-radius:10px;width:min(95vw,840px);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);overflow:hidden;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.8rem 1.2rem;border-bottom:1px solid #e0e6ec;background:#f6f8fa;flex-shrink:0;">
-      <div>
-        <div style="font-size:0.72rem;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">AI Template Generation</div>
-        <div style="font-weight:600;font-size:0.95rem;">Generate Subject + Body (HTML)</div>
-      </div>
-      <button onclick="closeTemplateAIModal()" type="button"
-        style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:#666;line-height:1;padding:0 0.2rem;"
-        title="Close">&times;</button>
-    </div>
-
-    <div style="padding:1rem 1.2rem;overflow:auto;">
-      <input type="hidden" id="aiModalMode" value="add">
-      <input type="hidden" id="aiModalNameInputId" value="">
-      <input type="hidden" id="aiModalSubjectInputId" value="">
-      <input type="hidden" id="aiModalBodyInputId" value="">
-
-      <label style="display:block;margin-bottom:0.6rem;">Prompt Objective
-        <textarea id="aiPromptObjective" rows="2" placeholder="Example: Discovery mail for cloud migration with clear CTA for a 30-minute workshop."></textarea>
-      </label>
-      <label style="display:block;margin-bottom:0.6rem;">Tone
-        <select id="aiPromptTone">
-          <option value="professional">Professional</option>
-          <option value="friendly">Friendly</option>
-          <option value="executive">Executive</option>
-          <option value="technical">Technical</option>
-        </select>
-      </label>
-      <label class="checkbox-row" style="margin-bottom:0.6rem;">
-        <input type="checkbox" id="aiKeepSubjectCheckbox">
-        Keep current subject unchanged (generate body only)
-      </label>
-      <label style="display:block;margin-bottom:0.6rem;">Extra Prompt Details
-        <textarea id="aiPromptDetails" rows="3" placeholder="Audience, CTA, priorities, constraints, timeline, industry context, etc."></textarea>
-      </label>
-      <label style="display:block;margin-bottom:0.6rem;">Opportunity Context (optional)
-        <select id="aiPromptCustomer" onchange="renderAIMacroContext()">
-          <option value="">-- No opportunity selected --</option>
-          {% for c in customers %}
-            <option value="{{ c.id }}">{{ c.customer_name }}{% if c.account_name %} ({{ c.account_name }}){% endif %}</option>
-          {% endfor %}
-        </select>
-      </label>
-
-      <div class="hint" style="margin-bottom:0.45rem;">Current template name: <strong id="aiCurrentTemplateName"></strong></div>
-      <label style="display:block;margin-bottom:0.5rem;">Current Subject (used as source)
-        <textarea id="aiCurrentSubject" rows="2" readonly style="background:#f8fafc;"></textarea>
-      </label>
-      <label style="display:block;margin-bottom:0.5rem;">Current Body HTML (used as source)
-        <textarea id="aiCurrentBody" rows="6" readonly style="background:#f8fafc;"></textarea>
-      </label>
-      <div class="hint">Available macros AI should use: <span id="aiMacroList"></span></div>
-    </div>
-
-    <div style="display:flex;gap:8px;justify-content:flex-end;padding:0.7rem 1.2rem;border-top:1px solid #e0e6ec;background:#f6f8fa;flex-shrink:0;">
-      <button class="btn btn-secondary" type="button" onclick="closeTemplateAIModal()">Cancel</button>
-      <button class="btn" id="aiModalGenerateBtn" type="button" onclick="submitTemplateAIGeneration()">Generate Template</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Template Preview Modal ───────────────────────────────── -->
-<div id="tplPreviewModal"
-  style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.55);align-items:center;justify-content:center;"
-  onclick="if(event.target===this)closeTplPreview()">
-  <div style="background:#fff;border-radius:10px;width:min(94vw,760px);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);overflow:hidden;">
-    <!-- header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.8rem 1.2rem;border-bottom:1px solid #e0e6ec;background:#f6f8fa;flex-shrink:0;">
-      <div>
-        <div style="font-size:0.72rem;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Preview (sample data)</div>
-        <div style="font-weight:600;font-size:0.95rem;" id="tplPreviewSubject"></div>
-      </div>
-      <button onclick="closeTplPreview()" type="button"
-        style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:#666;line-height:1;padding:0 0.2rem;"
-        title="Close">&times;</button>
-    </div>
-    <!-- iframe body -->
-    <iframe id="tplPreviewFrame"
-      style="flex:1;border:none;width:100%;min-height:420px;background:#fff;"
-      srcdoc=""></iframe>
-    <!-- footer -->
-    <div style="padding:0.65rem 1.2rem;border-top:1px solid #e0e6ec;background:#f6f8fa;font-size:0.78rem;color:#888;flex-shrink:0;">
-      Macros replaced with sample values for preview. Press <kbd>Esc</kbd> or click outside to close.
-    </div>
-  </div>
-</div>
 {% endblock %}
-

@@ -448,6 +448,11 @@
     var body = document.getElementById('emailCustomBody');
     if (subj) subj.addEventListener('input', function() { updateCustomPreview(false); });
     if (body) body.addEventListener('input', function() { updateCustomPreview(false); });
+
+    var qs = new URLSearchParams(window.location.search);
+    if (qs.get('quick_add') === '1') {
+      openQuickAddModal();
+    }
   });
 
   function showModalMsg(text, type) {

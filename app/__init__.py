@@ -152,6 +152,12 @@ def _ensure_runtime_schema_updates():
         ))
         db.session.execute(text("CREATE INDEX idx_customer_diagrams_customer_id ON customer_diagrams (customer_id)"))
 
+    if "email_logs" in existing_tables:
+        email_log_columns = {col["name"]: col for col in inspector.get_columns("email_logs")}
+        customer_col = email_log_columns.get("customer_id")
+        if customer_col and customer_col.get("nullable") is False:
+            db.session.execute(text("ALTER TABLE email_logs ALTER COLUMN customer_id DROP NOT NULL"))
+
     default_tags = [
         ("important", "#c0392b"),
         ("email", "#1d4ed8"),
@@ -317,6 +323,8 @@ def _bootstrap_database(app):
 def create_app():
     app = Flask(__name__, static_folder="../static", template_folder="templates")
     app.config.from_object(Config)
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.jinja_env.auto_reload = True
 
     upload_path = Path(app.config["UPLOAD_FOLDER"])
     if not upload_path.is_absolute():

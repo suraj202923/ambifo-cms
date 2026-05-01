@@ -3120,6 +3120,19 @@ def opportunity_sow_send_email(customer_id):
 @crm_bp.route("/opportunities/<int:customer_id>/delete", methods=["POST"])
 def opportunity_delete(customer_id):
     customer = Customer.query.get_or_404(customer_id)
+    # Remove dependent rows explicitly to avoid FK nulling issues on non-null child columns.
+    OpportunityHistory.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    MeetingInvite.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    MeetingAvailabilityRequest.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    GatheringServerDetail.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    GatheringFileNasDetail.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    GatheringBlockStorageDetail.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    GatheringRequest.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    CustomerDocument.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    CustomerDiagram.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    CustomerSOW.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    EmailLog.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+
     db.session.delete(customer)
     db.session.commit()
     flash("Opportunity deleted.", "success")
@@ -3566,11 +3579,144 @@ def configuration():
                     status=result.status,
                     error_message=result.error,
                 ))
-                db.session.commit()
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    if result.success or result.status == "dev-mode":
+                        flash(
+                            "SMTP test email sent, but log insert failed due to old DB schema. Restart app once to auto-fix.",
+                            "error",
+                        )
+                    else:
+                        flash(f"SMTP test failed: {result.error}", "error")
+                    return redirect(url_for("crm.configuration") + "#smtp-config")
                 if result.success or result.status == "dev-mode":
                     flash(f"Test email sent to {test_to} (status: {result.status}).", "success")
                 else:
                     flash(f"SMTP test failed: {result.error}", "error")
+
+        elif action == "add_template":
+            name = (request.form.get("name") or "").strip()
+            subject_template = (request.form.get("subject_template") or "").strip()
+            body_template = _sanitize_email_template_body(request.form.get("body_template") or "")
+            if not name or not subject_template or not body_template:
+                flash("Template name, subject, and body are required.", "error")
+            elif EmailTemplate.query.filter_by(name=name).first():
+                flash("Template name already exists.", "error")
+            else:
+                db.session.add(EmailTemplate(
+                    name=name,
+                    subject_template=subject_template,
+                    body_template=body_template,
+                ))
+                db.session.commit()
+                flash("Email template created.", "success")
+            return redirect(url_for("crm.configuration") + "#email-template-config")
+
+        elif action == "edit_template":
+            tpl_id = request.form.get("template_id", type=int)
+            tpl = EmailTemplate.query.get(tpl_id)
+            if not tpl:
+                flash("Template not found.", "error")
+                return redirect(url_for("crm.configuration") + "#email-template-config")
+
+            name = (request.form.get("name") or "").strip()
+            subject_template = (request.form.get("subject_template") or "").strip()
+            body_template = _sanitize_email_template_body(request.form.get("body_template") or "")
+            if not name or not subject_template or not body_template:
+                flash("Template name, subject, and body are required.", "error")
+                return redirect(url_for("crm.configuration") + "#email-template-config")
+
+            duplicate = EmailTemplate.query.filter(
+                EmailTemplate.name == name,
+                EmailTemplate.id != tpl.id,
+            ).first()
+            if duplicate:
+                flash("Another template already uses that name.", "error")
+                return redirect(url_for("crm.configuration") + "#email-template-config")
+
+            tpl.name = name
+            tpl.subject_template = subject_template
+            tpl.body_template = body_template
+            db.session.commit()
+            flash("Email template updated.", "success")
+            return redirect(url_for("crm.configuration") + "#email-template-config")
+
+        elif action == "delete_template":
+            tpl_id = request.form.get("template_id", type=int)
+            tpl = EmailTemplate.query.get(tpl_id)
+            if not tpl:
+                flash("Template not found.", "error")
+            elif _is_system_template_name(tpl.name):
+                flash("System templates cannot be deleted. You can edit them.", "error")
+            else:
+                db.session.delete(tpl)
+                db.session.commit()
+                flash("Email template deleted.", "success")
+            return redirect(url_for("crm.configuration") + "#email-template-config")
+
+        elif action == "test_email_template":
+            template_id = request.form.get("template_id", type=int)
+            test_to = (request.form.get("test_email_to") or "").strip()
+            customer_id = request.form.get("test_customer_id", type=int)
+
+            if not template_id:
+                flash("Please select an email template.", "error")
+                return redirect(url_for("crm.configuration") + "#email-template-config")
+            if not test_to or "@" not in test_to:
+                flash("Please enter a valid recipient email for test.", "error")
+                return redirect(url_for("crm.configuration") + "#email-template-config")
+
+            template = EmailTemplate.query.get(template_id)
+            if not template:
+                flash("Template not found.", "error")
+                return redirect(url_for("crm.configuration") + "#email-template-config")
+
+            customer = Customer.query.get(customer_id) if customer_id else None
+            template_text = f"{template.subject_template or ''}\n{template.body_template or ''}"
+            needs_customer_context = (
+                "{{meeting_availability_form_link}}" in template_text
+                or "{{meeting_availability_expires_at}}" in template_text
+            )
+
+            if needs_customer_context and not customer:
+                flash(
+                    "This template needs opportunity/customer context. Please choose a customer for test send.",
+                    "error",
+                )
+                return redirect(url_for("crm.configuration") + "#email-template-config")
+
+            if customer:
+                macro_values = _build_template_macro_values_for_customer(customer, template, recipient_email=test_to)
+                rendered_subject = render_macros(template.subject_template, macro_values)
+                rendered_body = render_macros(template.body_template, macro_values)
+            else:
+                rendered_subject = template.subject_template
+                rendered_body = template.body_template
+
+            email_service = EmailService(current_app)
+            result = email_service.send_html_email(test_to, rendered_subject, rendered_body)
+            db.session.add(EmailLog(
+                customer_id=customer.id if customer else None,
+                template_id=template.id,
+                recipient_email=test_to,
+                email_type="template-test",
+                subject=rendered_subject,
+                body=rendered_body,
+                status=result.status,
+                error_message=result.error,
+            ))
+            db.session.commit()
+
+            if result.success or result.status == "dev-mode":
+                flash(
+                    f"Template test email sent to {test_to} (status: {result.status}).",
+                    "success",
+                )
+            else:
+                flash(f"Template test failed: {result.error}", "error")
+            return redirect(url_for("crm.configuration") + "#email-template-config")
 
         elif action == "save_teams":
             SystemSetting.set_value("teams.tenant_id", (request.form.get("teams_tenant_id") or "").strip())
@@ -4074,6 +4220,27 @@ def configuration():
     cloud_operators = OpportunityCloudOperator.query.order_by(OpportunityCloudOperator.created_at.asc()).all()
     update_tags = OpportunityUpdateTag.query.order_by(OpportunityUpdateTag.created_at.asc()).all()
     admin_users = User.query.order_by(User.created_at.asc()).all()
+    email_templates = EmailTemplate.query.order_by(EmailTemplate.created_at.desc()).all()
+    customers = Customer.query.order_by(Customer.customer_name.asc()).all()
+    active_diagrams = (
+        CustomerDiagram.query
+        .filter_by(is_active=True)
+        .order_by(CustomerDiagram.customer_id.asc(), CustomerDiagram.macro_key.asc())
+        .all()
+    )
+    diagram_macro_map = {}
+    for diagram in active_diagrams:
+        customer_key = str(diagram.customer_id)
+        if customer_key not in diagram_macro_map:
+            diagram_macro_map[customer_key] = []
+        if (diagram.macro_key or "").strip():
+            diagram_macro_map[customer_key].append(
+                {
+                    "macro_key": diagram.macro_key,
+                    "diagram_name": diagram.diagram_name,
+                }
+            )
+
     return render_template(
         "configuration.html",
         smtp=smtp_settings,
@@ -4090,6 +4257,11 @@ def configuration():
         cloud_operators=cloud_operators,
         update_tags=update_tags,
         admin_users=admin_users,
+        email_templates=email_templates,
+        customers=customers,
+        diagram_macro_map=diagram_macro_map,
+        email_macro_catalog=_email_template_macro_catalog(),
+        system_template_names=_system_template_name_set(),
     )
 
 
