@@ -93,6 +93,10 @@ def _ensure_runtime_schema_updates():
         customer_columns = {col["name"] for col in inspector.get_columns("customers")}
         if "cloud" not in customer_columns:
             db.session.execute(text("ALTER TABLE customers ADD COLUMN cloud VARCHAR(80)"))
+        if "main_page_address" not in customer_columns:
+            db.session.execute(text("ALTER TABLE customers ADD COLUMN main_page_address VARCHAR(255)"))
+        if "billing" not in customer_columns:
+            db.session.execute(text("ALTER TABLE customers ADD COLUMN billing VARCHAR(255)"))
 
     if "customer_sows" in existing_tables:
         sow_columns = {col["name"] for col in inspector.get_columns("customer_sows")}

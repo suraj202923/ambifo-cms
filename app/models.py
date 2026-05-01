@@ -17,6 +17,8 @@ class Customer(db.Model):
     email = db.Column(db.String(255), nullable=False, unique=True)
     phone = db.Column(db.String(100), nullable=True)
     cloud = db.Column(db.String(80), nullable=True)
+    main_page_address = db.Column(db.String(255), nullable=True)
+    billing = db.Column(db.String(255), nullable=True)
     city = db.Column(db.String(120), nullable=True)
     aws_id = db.Column(db.String(120), nullable=True)
     opportunity_id = db.Column(db.String(120), nullable=True)

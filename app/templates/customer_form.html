@@ -26,8 +26,9 @@
           {% endfor %}
         </select>
       </label>
+      <label>Billing Address<input name="billing" value="{{ customer.billing if customer else '' }}"></label>
       <label>City<input name="city" value="{{ customer.city if customer else '' }}"></label>
-      <label>AWS ID<input name="aws_id" value="{{ customer.aws_id if customer else '' }}"></label>
+      <label>Cloud ID<input name="aws_id" value="{{ customer.aws_id if customer else '' }}"></label>
       <label>Opportunity ID<input name="opportunity_id" value="{{ customer.opportunity_id if customer else '' }}"></label>
       <label>Segment
         <select name="segment">
