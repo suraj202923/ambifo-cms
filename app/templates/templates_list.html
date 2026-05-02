@@ -182,6 +182,162 @@
         </form>
       </section>
 
+      <section class="panel config-card mobile-collapsible" id="send-lead-bulk">
+        <h3>Send Promotional Email to Leads</h3>
+        <p class="hint">Send template emails to leads stored in the Leads table.</p>
+        <form method="post" class="grid-form" onsubmit="return confirm('Send promotional email to selected leads?');">
+          <input type="hidden" name="action" value="send_lead_bulk_email">
+          <label>Template
+            <select name="template_id" required>
+              <option value="">-- Select Template --</option>
+              {% for t in all_templates %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Lead Filter
+            <select name="lead_send_state">
+              <option value="all">All Active Leads</option>
+              <option value="not_emailed">Only Not Emailed</option>
+              <option value="emailed">Only Already Emailed</option>
+            </select>
+          </label>
+          <button class="btn mobile-sticky-submit" type="submit">Send Promotional Bulk Email</button>
+        </form>
+      </section>
+
+      <section class="panel config-card" id="leads-section">
+        <h3>Leads Data</h3>
+        <p class="hint">Collect raw leads here, manage them, and use them for promotional email sending.</p>
+
+        <div class="ce-block" style="margin-bottom:0.75rem;">
+          <p class="ce-label">Upload Leads CSV</p>
+          <form method="post" enctype="multipart/form-data" class="grid-form" style="margin-top:0;">
+            <input type="hidden" name="action" value="upload_leads_csv">
+            <label class="full">CSV File
+              <input type="file" name="leads_csv_file" accept=".csv,text/csv" required>
+            </label>
+            <div class="full" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+              <button class="btn" type="submit">Upload Leads CSV</button>
+              <a class="btn btn-secondary" href="{{ url_for('crm.leads_csv_sample') }}">Download Leads Sample CSV</a>
+            </div>
+          </form>
+        </div>
+
+        <div class="ce-block" style="margin-bottom:0.75rem;">
+          <p class="ce-label">Add Lead Manually</p>
+          <form method="post" class="grid-form" style="margin-top:0;">
+            <input type="hidden" name="action" value="add_lead">
+            <label>Lead Name
+              <input name="lead_name" placeholder="John Doe">
+            </label>
+            <label>Email *
+              <input type="email" name="lead_email" required>
+            </label>
+            <label>Phone
+              <input name="lead_phone">
+            </label>
+            <label>Company
+              <input name="lead_company">
+            </label>
+            <label>City
+              <input name="lead_city">
+            </label>
+            <label>Source
+              <input name="lead_source" placeholder="Website Campaign">
+            </label>
+            <label>Tags
+              <input name="lead_tags" placeholder="promo,priority">
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" name="lead_is_active" value="1" checked> Active Lead
+            </label>
+            <label class="full">Notes
+              <textarea name="lead_notes" rows="2"></textarea>
+            </label>
+            <button class="btn" type="submit">Add Lead</button>
+          </form>
+        </div>
+
+        <form method="get" class="inline-form" style="margin-bottom:0.6rem;">
+          <input name="lead_q" placeholder="Search lead name, email, source..." value="{{ lead_q or '' }}">
+          <select name="lead_email_state">
+            <option value="all" {% if lead_email_state == 'all' %}selected{% endif %}>All</option>
+            <option value="not_emailed" {% if lead_email_state == 'not_emailed' %}selected{% endif %}>Not Emailed</option>
+            <option value="emailed" {% if lead_email_state == 'emailed' %}selected{% endif %}>Emailed</option>
+          </select>
+          <button type="submit">Filter</button>
+        </form>
+
+        {% if lead_pagination.items %}
+        <div class="table-wrap">
+          <table class="tpl-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Company</th>
+                <th>Source</th>
+                <th>Last Email</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for lead in lead_pagination.items %}
+              <tr>
+                <td data-label="Name">
+                  <input form="lead-edit-{{ lead.id }}" name="lead_name" value="{{ lead.lead_name or '' }}" style="width:100%;">
+                </td>
+                <td data-label="Email">
+                  <input form="lead-edit-{{ lead.id }}" type="email" name="lead_email" value="{{ lead.email or '' }}" required style="width:100%;">
+                </td>
+                <td data-label="Phone"><input form="lead-edit-{{ lead.id }}" name="lead_phone" value="{{ lead.phone or '' }}" style="width:100%;"></td>
+                <td data-label="Company"><input form="lead-edit-{{ lead.id }}" name="lead_company" value="{{ lead.company or '' }}" style="width:100%;"></td>
+                <td data-label="Source"><input form="lead-edit-{{ lead.id }}" name="lead_source" value="{{ lead.source or '' }}" style="width:100%;"></td>
+                <td data-label="Last Email" style="white-space:nowrap;">{{ lead.last_emailed_at.strftime('%Y-%m-%d %H:%M') if lead.last_emailed_at else '-' }}</td>
+                <td data-label="Status">{{ lead.last_email_status or '-' }}</td>
+                <td data-label="Action" style="white-space:nowrap;">
+                  <form id="lead-edit-{{ lead.id }}" method="post" style="display:inline-block;">
+                    <input type="hidden" name="action" value="edit_lead">
+                    <input type="hidden" name="lead_id" value="{{ lead.id }}">
+                    <input type="hidden" name="lead_city" value="{{ lead.city or '' }}">
+                    <input type="hidden" name="lead_tags" value="{{ lead.tags or '' }}">
+                    <input type="hidden" name="lead_notes" value="{{ lead.notes or '' }}">
+                    <input type="hidden" name="lead_is_active" value="{% if lead.is_active %}1{% endif %}">
+                    <button class="mini-btn" type="submit">Save</button>
+                  </form>
+                  <form method="post" style="display:inline-block;" onsubmit="return confirm('Delete this lead?');">
+                    <input type="hidden" name="action" value="delete_lead">
+                    <input type="hidden" name="lead_id" value="{{ lead.id }}">
+                    <button class="mini-btn danger" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination">
+          {% if lead_pagination.has_prev %}
+            <a class="page-link" href="{{ url_for('crm.template_list', lead_page=lead_pagination.prev_num, lead_q=lead_q, lead_email_state=lead_email_state) }}#leads-section">Previous</a>
+          {% else %}
+            <span class="page-link disabled">Previous</span>
+          {% endif %}
+          <span>Page {{ lead_pagination.page }} of {{ lead_pagination.pages }} ({{ leads_total_count }} leads)</span>
+          {% if lead_pagination.has_next %}
+            <a class="page-link" href="{{ url_for('crm.template_list', lead_page=lead_pagination.next_num, lead_q=lead_q, lead_email_state=lead_email_state) }}#leads-section">Next</a>
+          {% else %}
+            <span class="page-link disabled">Next</span>
+          {% endif %}
+        </div>
+        {% else %}
+          <p class="hint">No leads found.</p>
+        {% endif %}
+      </section>
+
       <section class="panel config-card" id="email-history">
         <h3>Email History</h3>
         {% if history_pagination.items %}
@@ -350,6 +506,8 @@
       <div class="config-links">
         <a href="#send-bulk">Send Bulk Email</a>
         <a href="#send-bulk-csv">Send Bulk Email via CSV</a>
+        <a href="#send-lead-bulk">Send Promo to Leads</a>
+        <a href="#leads-section">Leads Data</a>
         <a href="#send-custom">Send Custom Email</a>
         <a href="#email-history">Email History</a>
         <a href="#bulk-csv-history">Bulk CSV Execution History</a>

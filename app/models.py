@@ -102,6 +102,84 @@ class EmailBulkCsvExecution(db.Model):
     template = db.relationship("EmailTemplate", backref="csv_bulk_executions")
 
 
+class PartnerReferenceContact(db.Model):
+    __tablename__ = "partner_reference_contacts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True, index=True)
+    partner_name = db.Column(db.String(120), nullable=False)
+    contact_name = db.Column(db.String(160), nullable=False)
+    designation = db.Column(db.String(120), nullable=True)
+    email = db.Column(db.String(255), nullable=True)
+    phone = db.Column(db.String(100), nullable=True)
+    city = db.Column(db.String(120), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref="partner_reference_contacts")
+
+
+class PartnerReferenceActivity(db.Model):
+    __tablename__ = "partner_reference_activities"
+
+    id = db.Column(db.Integer, primary_key=True)
+    reference_contact_id = db.Column(db.Integer, db.ForeignKey("partner_reference_contacts.id"), nullable=False, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    activity_type = db.Column(db.String(40), nullable=False, default="note")
+    activity_date = db.Column(db.DateTime, nullable=True)
+    summary = db.Column(db.String(255), nullable=False)
+    details = db.Column(db.Text, nullable=True)
+    next_action = db.Column(db.String(255), nullable=True)
+    created_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    reference_contact = db.relationship("PartnerReferenceContact", backref="activities")
+    customer = db.relationship("Customer", backref="partner_reference_activities")
+
+
+class PartnerReferenceOpportunity(db.Model):
+    __tablename__ = "partner_reference_opportunities"
+
+    id = db.Column(db.Integer, primary_key=True)
+    reference_contact_id = db.Column(db.Integer, db.ForeignKey("partner_reference_contacts.id"), nullable=False, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("reference_contact_id", "customer_id", name="uq_ref_contact_customer"),
+    )
+
+    reference_contact = db.relationship("PartnerReferenceContact", backref="opportunity_links")
+    customer = db.relationship("Customer", backref="reference_links")
+
+
+class Lead(db.Model):
+    __tablename__ = "leads"
+
+    id = db.Column(db.Integer, primary_key=True)
+    lead_name = db.Column(db.String(160), nullable=True)
+    email = db.Column(db.String(255), nullable=True, unique=True, index=True)
+    phone = db.Column(db.String(100), nullable=True)
+    company = db.Column(db.String(160), nullable=True)
+    city = db.Column(db.String(120), nullable=True)
+    source = db.Column(db.String(120), nullable=True)
+    tags = db.Column(db.String(255), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    raw_payload = db.Column(db.Text, nullable=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    lead_status = db.Column(db.String(40), nullable=False, default="new")
+    last_emailed_at = db.Column(db.DateTime, nullable=True)
+    last_email_status = db.Column(db.String(40), nullable=True)
+    converted_at = db.Column(db.DateTime, nullable=True)
+    converted_customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    converted_customer = db.relationship("Customer", foreign_keys=[converted_customer_id])
+
+
 class GatheringRequest(db.Model):
     __tablename__ = "gathering_requests"
 

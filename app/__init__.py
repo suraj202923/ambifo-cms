@@ -189,6 +189,94 @@ def _ensure_runtime_schema_updates():
             ")"
         ))
 
+    if "partner_reference_contacts" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE partner_reference_contacts ("
+            "id SERIAL PRIMARY KEY, "
+            "customer_id INTEGER, "
+            "partner_name VARCHAR(120) NOT NULL, "
+            "contact_name VARCHAR(160) NOT NULL, "
+            "designation VARCHAR(120), "
+            "email VARCHAR(255), "
+            "phone VARCHAR(100), "
+            "city VARCHAR(120), "
+            "notes TEXT, "
+            "is_active BOOLEAN NOT NULL DEFAULT TRUE, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+        db.session.execute(text("CREATE INDEX idx_partner_reference_contacts_customer_id ON partner_reference_contacts (customer_id)"))
+    else:
+        ref_columns = {col["name"]: col for col in inspector.get_columns("partner_reference_contacts")}
+        customer_col = ref_columns.get("customer_id")
+        if customer_col and customer_col.get("nullable") is False:
+            db.session.execute(text("ALTER TABLE partner_reference_contacts ALTER COLUMN customer_id DROP NOT NULL"))
+
+    if "partner_reference_activities" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE partner_reference_activities ("
+            "id SERIAL PRIMARY KEY, "
+            "reference_contact_id INTEGER NOT NULL, "
+            "customer_id INTEGER NOT NULL, "
+            "activity_type VARCHAR(40) NOT NULL DEFAULT 'note', "
+            "activity_date TIMESTAMP, "
+            "summary VARCHAR(255) NOT NULL, "
+            "details TEXT, "
+            "next_action VARCHAR(255), "
+            "created_by VARCHAR(80), "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+        db.session.execute(text("CREATE INDEX idx_partner_reference_activities_contact_id ON partner_reference_activities (reference_contact_id)"))
+        db.session.execute(text("CREATE INDEX idx_partner_reference_activities_customer_id ON partner_reference_activities (customer_id)"))
+
+    if "partner_reference_opportunities" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE partner_reference_opportunities ("
+            "id SERIAL PRIMARY KEY, "
+            "reference_contact_id INTEGER NOT NULL, "
+            "customer_id INTEGER NOT NULL, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+        db.session.execute(text("CREATE INDEX idx_partner_reference_opportunities_ref_id ON partner_reference_opportunities (reference_contact_id)"))
+        db.session.execute(text("CREATE INDEX idx_partner_reference_opportunities_customer_id ON partner_reference_opportunities (customer_id)"))
+        db.session.execute(text("CREATE UNIQUE INDEX uq_ref_contact_customer ON partner_reference_opportunities (reference_contact_id, customer_id)"))
+
+    if "leads" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE leads ("
+            "id SERIAL PRIMARY KEY, "
+            "lead_name VARCHAR(160), "
+            "email VARCHAR(255) UNIQUE, "
+            "phone VARCHAR(100), "
+            "company VARCHAR(160), "
+            "city VARCHAR(120), "
+            "source VARCHAR(120), "
+            "tags VARCHAR(255), "
+            "notes TEXT, "
+            "raw_payload TEXT, "
+            "is_active BOOLEAN NOT NULL DEFAULT TRUE, "
+            "lead_status VARCHAR(40) NOT NULL DEFAULT 'new', "
+            "last_emailed_at TIMESTAMP, "
+            "last_email_status VARCHAR(40), "
+            "converted_at TIMESTAMP, "
+            "converted_customer_id INTEGER, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+        db.session.execute(text("CREATE INDEX idx_leads_email ON leads (email)"))
+    else:
+        lead_columns = {col["name"] for col in inspector.get_columns("leads")}
+        if "lead_status" not in lead_columns:
+            db.session.execute(text("ALTER TABLE leads ADD COLUMN lead_status VARCHAR(40) NOT NULL DEFAULT 'new'"))
+        if "converted_at" not in lead_columns:
+            db.session.execute(text("ALTER TABLE leads ADD COLUMN converted_at TIMESTAMP"))
+        if "converted_customer_id" not in lead_columns:
+            db.session.execute(text("ALTER TABLE leads ADD COLUMN converted_customer_id INTEGER"))
+
     default_tags = [
         ("important", "#c0392b"),
         ("email", "#1d4ed8"),

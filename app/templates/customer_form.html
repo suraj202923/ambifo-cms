@@ -141,7 +141,172 @@
     {% endif %}
   </div>
 
-  <!-- ══ TAB 3: Gathering Data ═══════════════════════════ -->
+  <!-- ══ TAB 3: Partner References ═══════════════════════ -->
+  <div id="tab-references" class="tab-pane">
+    <div class="ce-block mobile-collapsible expanded" style="margin-top:0.5rem;">
+      <p class="ce-label">🔗 Assign Existing Reference to This Opportunity</p>
+      <form method="post" action="{{ url_for('crm.opportunity_reference_assign', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+        <label class="full">Reference Contact
+          <select name="reference_contact_id" required>
+            <option value="">Select reference contact</option>
+            {% for ref_opt in all_reference_contacts %}
+              {% if ref_opt.id not in assigned_reference_ids %}
+                <option value="{{ ref_opt.id }}">{{ ref_opt.partner_name }} - {{ ref_opt.contact_name }}{% if ref_opt.designation %} ({{ ref_opt.designation }}){% endif %}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </label>
+        <button class="btn btn-sm" type="submit">Assign to Opportunity</button>
+      </form>
+      <p class="hint" style="margin-top:0.4rem;">One reference can be assigned to multiple opportunities.</p>
+    </div>
+
+    <div class="ce-block mobile-collapsible expanded" style="margin-top:0.5rem;">
+      <p class="ce-label">🤝 Add Partner Reference Contact</p>
+      <form method="post" action="{{ url_for('crm.reference_contact_add', customer_id=customer.id) }}" class="grid-form" style="margin-top:0;">
+        <label>Partner *
+          <input name="partner_name" placeholder="AWS / Azure / GCP / OEM" required>
+        </label>
+        <label>Contact Name *
+          <input name="contact_name" required>
+        </label>
+        <label>Designation
+          <input name="designation" placeholder="Partner Manager">
+        </label>
+        <label>Email
+          <input type="email" name="email" placeholder="name@partner.com">
+        </label>
+        <label>Phone
+          <input name="phone" placeholder="+91 ...">
+        </label>
+        <label>City
+          <input name="city" placeholder="Bangalore">
+        </label>
+        <label class="full">Notes
+          <textarea name="notes" rows="2" placeholder="Partnership context, escalation scope, etc."></textarea>
+        </label>
+        <button class="btn btn-sm" type="submit">Save Reference Contact</button>
+      </form>
+    </div>
+
+    {% if reference_contacts %}
+      {% for ref in reference_contacts %}
+      <div class="ce-block mobile-collapsible expanded" style="margin-top:0.65rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+          <p class="ce-label" style="margin:0;">{{ ref.contact_name }} • {{ ref.partner_name }}</p>
+          <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;">
+            <span class="badge-status {% if ref.is_active %}badge-ok{% else %}badge-fail{% endif %}">{% if ref.is_active %}Active{% else %}Inactive{% endif %}</span>
+            <form method="post" action="{{ url_for('crm.opportunity_reference_unassign', customer_id=customer.id, reference_id=ref.id) }}" onsubmit="return confirm('Unassign this reference from this opportunity?')" style="margin:0;">
+              <button class="mini-btn danger" type="submit">Unassign</button>
+            </form>
+          </div>
+        </div>
+
+        <form method="post" action="{{ url_for('crm.reference_contact_edit', customer_id=customer.id, contact_id=ref.id) }}" class="grid-form" style="margin-top:0.5rem;">
+          <label>Partner *
+            <input name="partner_name" value="{{ ref.partner_name }}" required>
+          </label>
+          <label>Contact Name *
+            <input name="contact_name" value="{{ ref.contact_name }}" required>
+          </label>
+          <label>Designation
+            <input name="designation" value="{{ ref.designation or '' }}">
+          </label>
+          <label>Email
+            <input type="email" name="email" value="{{ ref.email or '' }}">
+          </label>
+          <label>Phone
+            <input name="phone" value="{{ ref.phone or '' }}">
+          </label>
+          <label>City
+            <input name="city" value="{{ ref.city or '' }}">
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" name="is_active" {% if ref.is_active %}checked{% endif %}> Active Contact
+          </label>
+          <label class="full">Notes
+            <textarea name="notes" rows="2">{{ ref.notes or '' }}</textarea>
+          </label>
+          <div class="tpl-form-actions full">
+            <button class="btn btn-sm" type="submit">Update Contact</button>
+          </div>
+        </form>
+        <form method="post" action="{{ url_for('crm.reference_contact_delete', customer_id=customer.id, contact_id=ref.id) }}" onsubmit="return confirm('Delete this reference contact and all its activities?');" style="margin-top:0.4rem;">
+          <button class="btn btn-sm btn-secondary" type="submit">Delete Contact</button>
+        </form>
+
+        <div class="ce-block" style="margin-top:0.7rem;">
+          <p class="ce-label">➕ Add Activity</p>
+          <form method="post" action="{{ url_for('crm.reference_contact_activity_add', customer_id=customer.id, contact_id=ref.id) }}" class="grid-form" style="margin-top:0;">
+            <label>Type
+              <select name="activity_type">
+                <option value="call">Call</option>
+                <option value="meeting">Meeting</option>
+                <option value="email">Email</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="note">Note</option>
+              </select>
+            </label>
+            <label>Date & Time
+              <input type="datetime-local" name="activity_date">
+            </label>
+            <label class="full">Summary *
+              <input name="summary" required placeholder="Discussed migration blockers with partner architect">
+            </label>
+            <label class="full">Details
+              <textarea name="details" rows="2" placeholder="Call notes, commitments, dependencies"></textarea>
+            </label>
+            <label class="full">Next Action
+              <input name="next_action" placeholder="Partner to share pricing by Friday">
+            </label>
+            <button class="btn btn-sm" type="submit">Add Activity</button>
+          </form>
+        </div>
+
+        <div class="table-wrap" style="margin-top:0.6rem;">
+          <table class="tpl-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Summary</th>
+                <th>Details</th>
+                <th>Next Action</th>
+                <th>By</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for a in ref_activity_map.get(ref.id, []) %}
+              <tr>
+                <td data-label="Date" style="white-space:nowrap;">{{ (a.activity_date or a.created_at).strftime('%Y-%m-%d %H:%M') }}</td>
+                <td data-label="Type">{{ a.activity_type | upper }}</td>
+                <td data-label="Summary">{{ a.summary }}</td>
+                <td data-label="Details">{{ a.details or '-' }}</td>
+                <td data-label="Next Action">{{ a.next_action or '-' }}</td>
+                <td data-label="By">{{ a.created_by or '-' }}</td>
+                <td data-label="Action">
+                  <form method="post" action="{{ url_for('crm.reference_contact_activity_delete', customer_id=customer.id, activity_id=a.id) }}" onsubmit="return confirm('Delete this activity?');">
+                    <button class="mini-btn danger" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="7" style="color:#6b7280;">No activities logged for this contact yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="hint" style="margin-top:0.75rem;">No partner reference contacts added yet.</p>
+    {% endif %}
+  </div>
+
+  <!-- ══ TAB 4: Gathering Data ═══════════════════════════ -->
   <div id="tab-gathering" class="tab-pane">
 
     <!-- Gathering links -->
@@ -717,6 +882,7 @@
     <nav class="sidebar-tabs">
       <button class="sidebar-tab active" data-tab="info" onclick="switchTab('info',this)">ℹ️ Information</button>
       <button class="sidebar-tab" data-tab="history" onclick="switchTab('history',this)">🕘 History</button>
+      <button class="sidebar-tab" data-tab="references" onclick="switchTab('references',this)">🤝 References</button>
       <button class="sidebar-tab" data-tab="gathering" onclick="switchTab('gathering',this)">📋 Gathering Data</button>
       <button class="sidebar-tab" data-tab="meeting" onclick="switchTab('meeting',this)">📅 Meeting Links</button>
       <button class="sidebar-tab" data-tab="documents" onclick="switchTab('documents',this)">📁 Documents</button>

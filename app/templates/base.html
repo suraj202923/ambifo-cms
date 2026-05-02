@@ -26,7 +26,9 @@
     {% if current_user.is_authenticated %}
       <nav>
         <a href="{{ url_for('crm.dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('crm.lead_list') }}">Leads</a>
         <a href="{{ url_for('crm.opportunity_list') }}">Opportunity</a>
+        <a href="{{ url_for('crm.reference_list') }}">References</a>
         <a href="{{ url_for('crm.template_list') }}">Email</a>
         <a href="{{ url_for('crm.configuration') }}">Configuration</a>
       </nav>
@@ -55,8 +57,10 @@
     <button type="button" id="install-app-btn-mobile" class="btn install-app-btn mobile-install-btn" style="display:none;" aria-label="Install app">Install App</button>
     <div class="mobile-quickbar" aria-label="Quick actions">
       <a href="{{ url_for('crm.dashboard') }}" aria-label="Dashboard" title="Dashboard"><span class="quick-icon">⌂</span><span class="sr-only">Dashboard</span></a>
+      <a href="{{ url_for('crm.lead_list') }}" aria-label="Leads" title="Leads"><span class="quick-icon">◎</span><span class="sr-only">Leads</span></a>
       <a href="{{ url_for('crm.opportunity_list', quick_add='1') }}" aria-label="Quick Add Opportunity" title="Quick Add Opportunity"><span class="quick-icon">＋</span><span class="sr-only">Quick Add Opportunity</span></a>
       <a href="{{ url_for('crm.opportunity_list') }}" aria-label="Opportunity List" title="Opportunity List"><span class="quick-icon">☰</span><span class="sr-only">Opportunity List</span></a>
+      <a href="{{ url_for('crm.reference_list') }}" aria-label="References" title="References"><span class="quick-icon">👥</span><span class="sr-only">References</span></a>
       <a href="{{ url_for('crm.template_list') }}" aria-label="Email" title="Email"><span class="quick-icon">✉</span><span class="sr-only">Email</span></a>
       <a href="{{ url_for('crm.configuration') }}" aria-label="Configuration" title="Configuration"><span class="quick-icon">⚙</span><span class="sr-only">Configuration</span></a>
     </div>

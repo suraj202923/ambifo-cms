@@ -46,6 +46,7 @@ from app.models import (
     GatheringFileNasDetail,
     GatheringRequest,
     GatheringServerDetail,
+    Lead,
     MeetingAvailabilityRequest,
     MeetingInvite,
     OpportunityHistory,
@@ -53,6 +54,9 @@ from app.models import (
     OpportunityCloudOperator,
     OpportunitySegment,
     OpportunityStatus,
+    PartnerReferenceActivity,
+    PartnerReferenceContact,
+    PartnerReferenceOpportunity,
     SOWMasterTemplate,
     SOWMasterTemplateSection,
     SystemSetting,
@@ -1421,6 +1425,400 @@ def customer_list():
     return redirect(url_for("crm.opportunity_list", **request.args))
 
 
+@crm_bp.route("/references")
+def reference_list():
+    query = (request.args.get("q") or "").strip()
+    partner_filter = (request.args.get("partner") or "").strip()
+    sort_by = (request.args.get("sort") or "latest_activity_desc").strip()
+    page = request.args.get("page", 1, type=int)
+    per_page = 10
+
+    last_activity_subq = (
+        db.session.query(
+            PartnerReferenceActivity.reference_contact_id.label("ref_id"),
+            db.func.max(
+                db.func.coalesce(
+                    PartnerReferenceActivity.activity_date,
+                    PartnerReferenceActivity.created_at,
+                )
+            ).label("last_activity_at"),
+        )
+        .group_by(PartnerReferenceActivity.reference_contact_id)
+        .subquery()
+    )
+
+    contacts_query = (
+        db.session.query(PartnerReferenceContact, last_activity_subq.c.last_activity_at)
+        .outerjoin(last_activity_subq, PartnerReferenceContact.id == last_activity_subq.c.ref_id)
+    )
+
+    if query:
+        like = f"%{query}%"
+        contacts_query = contacts_query.filter(
+            db.or_(
+                PartnerReferenceContact.contact_name.ilike(like),
+                PartnerReferenceContact.email.ilike(like),
+                PartnerReferenceContact.phone.ilike(like),
+                PartnerReferenceContact.city.ilike(like),
+            )
+        )
+    if partner_filter:
+        contacts_query = contacts_query.filter(PartnerReferenceContact.partner_name.ilike(partner_filter))
+
+    if sort_by == "latest_activity_desc":
+        contacts_query = contacts_query.order_by(
+            last_activity_subq.c.last_activity_at.is_(None),
+            last_activity_subq.c.last_activity_at.desc(),
+            PartnerReferenceContact.created_at.desc(),
+        )
+    elif sort_by == "newest_contact":
+        contacts_query = contacts_query.order_by(PartnerReferenceContact.created_at.desc())
+    elif sort_by == "partner_asc":
+        contacts_query = contacts_query.order_by(
+            PartnerReferenceContact.partner_name.asc(),
+            PartnerReferenceContact.contact_name.asc(),
+        )
+    elif sort_by == "contact_asc":
+        contacts_query = contacts_query.order_by(PartnerReferenceContact.contact_name.asc())
+    elif sort_by == "active_first":
+        contacts_query = contacts_query.order_by(
+            PartnerReferenceContact.is_active.desc(),
+            PartnerReferenceContact.contact_name.asc(),
+        )
+    else:
+        sort_by = "latest_activity_desc"
+        contacts_query = contacts_query.order_by(
+            last_activity_subq.c.last_activity_at.is_(None),
+            last_activity_subq.c.last_activity_at.desc(),
+            PartnerReferenceContact.created_at.desc(),
+        )
+
+    pagination = contacts_query.paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+
+    rows = []
+    for contact, last_activity_at in pagination.items:
+        activity_count = PartnerReferenceActivity.query.filter_by(reference_contact_id=contact.id).count()
+        rows.append(
+            {
+                "contact": contact,
+                "activity_count": activity_count,
+                "last_activity_at": last_activity_at,
+            }
+        )
+
+    partner_values = (
+        db.session.query(PartnerReferenceContact.partner_name)
+        .filter(PartnerReferenceContact.partner_name.isnot(None), PartnerReferenceContact.partner_name != "")
+        .distinct()
+        .order_by(PartnerReferenceContact.partner_name.asc())
+        .all()
+    )
+    partners = [p[0] for p in partner_values if p and p[0]]
+    customers = Customer.query.order_by(Customer.customer_name.asc()).all()
+
+    return render_template(
+        "references_list.html",
+        rows=rows,
+        pagination=pagination,
+        query=query,
+        partner_filter=partner_filter,
+        sort_by=sort_by,
+        partners=partners,
+        customers=customers,
+        total_count=PartnerReferenceContact.query.count(),
+    )
+
+
+@crm_bp.route("/leads", methods=["GET", "POST"])
+def lead_list():
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+
+        if action == "upload_leads_csv":
+            csv_file = request.files.get("leads_csv_file")
+            if not csv_file or not csv_file.filename:
+                flash("Please choose a CSV file for leads upload.", "error")
+                return redirect(url_for("crm.lead_list"))
+
+            try:
+                file_name = secure_filename(csv_file.filename or "leads.csv")
+                content = csv_file.read().decode("utf-8-sig")
+                reader = csv.DictReader(io.StringIO(content))
+                rows = list(reader)
+                headers = [h.strip() for h in (reader.fieldnames or [])]
+            except Exception as e:
+                flash(f"Failed to read leads CSV: {e}", "error")
+                return redirect(url_for("crm.lead_list"))
+
+            if "email" not in headers:
+                flash("Leads CSV must include 'email' column.", "error")
+                return redirect(url_for("crm.lead_list"))
+
+            imported = skipped = 0
+            for row in rows:
+                if _upsert_lead_from_row(row, uploaded_from=file_name):
+                    imported += 1
+                else:
+                    skipped += 1
+            db.session.commit()
+            flash(f"Leads upload done: {imported} imported/updated, {skipped} skipped.", "success")
+            return redirect(url_for("crm.lead_list"))
+
+        if action == "add_lead":
+            lead_email = (request.form.get("lead_email") or "").strip().lower()
+            if not _is_valid_email(lead_email):
+                flash("Valid lead email is required.", "error")
+                return redirect(url_for("crm.lead_list"))
+            if Lead.query.filter_by(email=lead_email).first():
+                flash("Lead with this email already exists.", "error")
+                return redirect(url_for("crm.lead_list"))
+
+            lead = Lead(
+                lead_name=(request.form.get("lead_name") or "").strip() or None,
+                email=lead_email,
+                phone=(request.form.get("lead_phone") or "").strip() or None,
+                company=(request.form.get("lead_company") or "").strip() or None,
+                city=(request.form.get("lead_city") or "").strip() or None,
+                source=(request.form.get("lead_source") or "").strip() or None,
+                tags=(request.form.get("lead_tags") or "").strip() or None,
+                notes=(request.form.get("lead_notes") or "").strip() or None,
+                is_active=bool(request.form.get("lead_is_active")),
+                lead_status="new",
+            )
+            db.session.add(lead)
+            db.session.commit()
+            flash("Lead added.", "success")
+            return redirect(url_for("crm.lead_list"))
+
+        if action == "edit_lead":
+            lead_id = request.form.get("lead_id", type=int)
+            lead = Lead.query.get(lead_id) if lead_id else None
+            if not lead:
+                flash("Lead not found.", "error")
+                return redirect(url_for("crm.lead_list"))
+            lead_email = (request.form.get("lead_email") or "").strip().lower()
+            if not _is_valid_email(lead_email):
+                flash("Valid lead email is required.", "error")
+                return redirect(url_for("crm.lead_list"))
+            dup = Lead.query.filter(Lead.email == lead_email, Lead.id != lead.id).first()
+            if dup:
+                flash("Another lead already uses this email.", "error")
+                return redirect(url_for("crm.lead_list"))
+
+            lead.lead_name = (request.form.get("lead_name") or "").strip() or None
+            lead.email = lead_email
+            lead.phone = (request.form.get("lead_phone") or "").strip() or None
+            lead.company = (request.form.get("lead_company") or "").strip() or None
+            lead.city = (request.form.get("lead_city") or "").strip() or None
+            lead.source = (request.form.get("lead_source") or "").strip() or None
+            lead.tags = (request.form.get("lead_tags") or "").strip() or None
+            lead.notes = (request.form.get("lead_notes") or "").strip() or None
+            lead.is_active = bool(request.form.get("lead_is_active"))
+            db.session.commit()
+            flash("Lead updated.", "success")
+            return redirect(url_for("crm.lead_list"))
+
+        if action == "delete_lead":
+            lead_id = request.form.get("lead_id", type=int)
+            lead = Lead.query.get(lead_id) if lead_id else None
+            if not lead:
+                flash("Lead not found.", "error")
+                return redirect(url_for("crm.lead_list"))
+            db.session.delete(lead)
+            db.session.commit()
+            flash("Lead deleted.", "success")
+            return redirect(url_for("crm.lead_list"))
+
+        if action == "convert_lead_to_opportunity":
+            lead_id = request.form.get("lead_id", type=int)
+            lead = Lead.query.get(lead_id) if lead_id else None
+            if not lead:
+                flash("Lead not found.", "error")
+                return redirect(url_for("crm.lead_list"))
+            if not _is_valid_email(lead.email or ""):
+                flash("Lead email is invalid. Please edit and fix email before conversion.", "error")
+                return redirect(url_for("crm.lead_list"))
+
+            existing_customer = Customer.query.filter_by(email=(lead.email or "").strip()).first()
+            if existing_customer:
+                lead.converted_customer_id = existing_customer.id
+                lead.converted_at = datetime.utcnow()
+                lead.lead_status = "converted"
+                lead.is_active = False
+                _log_opportunity_history(
+                    existing_customer.id,
+                    action="lead-converted",
+                    changes_summary=(
+                        f"Lead converted and linked to existing opportunity. "
+                        f"Lead: {lead.lead_name or '-'} | Email: {lead.email or '-'} | Source: {lead.source or '-'}"
+                    ),
+                    tag_name="important",
+                )
+                db.session.commit()
+                flash("Lead linked to existing opportunity (same email).", "success")
+                return redirect(url_for("crm.opportunity_edit", customer_id=existing_customer.id))
+
+            customer_name = (lead.lead_name or lead.company or (lead.email or "").split("@")[0] or "New Lead").strip()
+            customer = Customer(
+                account_name=lead.company,
+                customer_name=customer_name,
+                email=(lead.email or "").strip(),
+                phone=lead.phone,
+                city=lead.city,
+                comment=lead.notes,
+            )
+            db.session.add(customer)
+            db.session.commit()
+
+            _log_opportunity_history(
+                customer.id,
+                action="lead-converted",
+                changes_summary=(
+                    f"Opportunity created from lead. Lead: {lead.lead_name or '-'} | Email: {lead.email or '-'} | "
+                    f"Lead source: {lead.source or '-'} | "
+                    f"Lead email status: {lead.last_email_status or '-'}"
+                ),
+                tag_name="important",
+            )
+
+            lead.converted_customer_id = customer.id
+            lead.converted_at = datetime.utcnow()
+            lead.lead_status = "converted"
+            lead.is_active = False
+            db.session.commit()
+            flash("Lead converted to opportunity.", "success")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id))
+
+    lead_q = (request.args.get("q") or "").strip()
+    lead_state = (request.args.get("lead_state") or "all").strip()
+    lead_email_state = (request.args.get("lead_email_state") or "all").strip()
+    page = request.args.get("page", 1, type=int)
+
+    leads_query = Lead.query
+    if lead_q:
+        like = f"%{lead_q}%"
+        leads_query = leads_query.filter(
+            db.or_(
+                Lead.lead_name.ilike(like),
+                Lead.email.ilike(like),
+                Lead.company.ilike(like),
+                Lead.phone.ilike(like),
+                Lead.city.ilike(like),
+                Lead.source.ilike(like),
+            )
+        )
+    if lead_state == "converted":
+        leads_query = leads_query.filter(Lead.lead_status == "converted")
+    elif lead_state == "open":
+        leads_query = leads_query.filter(Lead.lead_status != "converted")
+
+    if lead_email_state == "emailed":
+        leads_query = leads_query.filter(Lead.last_emailed_at.isnot(None))
+    elif lead_email_state == "not_emailed":
+        leads_query = leads_query.filter(Lead.last_emailed_at.is_(None))
+
+    pagination = leads_query.order_by(Lead.created_at.desc()).paginate(page=page, per_page=10, error_out=False)
+    return render_template(
+        "leads_list.html",
+        leads=pagination.items,
+        pagination=pagination,
+        lead_q=lead_q,
+        lead_state=lead_state,
+        lead_email_state=lead_email_state,
+        leads_total_count=Lead.query.count(),
+    )
+
+
+@crm_bp.route("/references/add", methods=["POST"])
+def reference_add_from_list():
+    partner_name = (request.form.get("partner_name") or "").strip()
+    contact_name = (request.form.get("contact_name") or "").strip()
+    if not partner_name or not contact_name:
+        flash("Partner name and contact name are required.", "error")
+        return redirect(url_for("crm.reference_list"))
+
+    customer_id = request.form.get("customer_id", type=int)
+    assigned_customer = Customer.query.get(customer_id) if customer_id else None
+
+    contact = PartnerReferenceContact(
+        customer_id=assigned_customer.id if assigned_customer else None,
+        partner_name=partner_name,
+        contact_name=contact_name,
+        designation=(request.form.get("designation") or "").strip(),
+        email=(request.form.get("email") or "").strip(),
+        phone=(request.form.get("phone") or "").strip(),
+        city=(request.form.get("city") or "").strip(),
+        notes=(request.form.get("notes") or "").strip(),
+        is_active=True,
+    )
+    db.session.add(contact)
+    db.session.commit()
+
+    if assigned_customer:
+        if not PartnerReferenceOpportunity.query.filter_by(
+            reference_contact_id=contact.id,
+            customer_id=assigned_customer.id,
+        ).first():
+            db.session.add(PartnerReferenceOpportunity(reference_contact_id=contact.id, customer_id=assigned_customer.id))
+            db.session.commit()
+        _log_opportunity_history(
+            assigned_customer.id,
+            action="reference-contact-added",
+            changes_summary=f"Reference contact added from References page: {contact.contact_name} ({contact.partner_name}).",
+            tag_name="important",
+        )
+        db.session.commit()
+
+    flash("Reference created successfully.", "success")
+    return redirect(url_for("crm.reference_list"))
+
+
+@crm_bp.route("/references/<int:reference_id>/assign", methods=["POST"])
+def reference_assign_from_list(reference_id):
+    contact = PartnerReferenceContact.query.get_or_404(reference_id)
+    old_customer_id = contact.customer_id
+
+    customer_id = request.form.get("customer_id", type=int)
+    new_customer = Customer.query.get(customer_id) if customer_id else None
+    contact.customer_id = new_customer.id if new_customer else None
+    if new_customer and not PartnerReferenceOpportunity.query.filter_by(
+        reference_contact_id=contact.id,
+        customer_id=new_customer.id,
+    ).first():
+        db.session.add(PartnerReferenceOpportunity(reference_contact_id=contact.id, customer_id=new_customer.id))
+    db.session.commit()
+
+    if old_customer_id and old_customer_id != contact.customer_id:
+        old_customer = Customer.query.get(old_customer_id)
+        if old_customer:
+            _log_opportunity_history(
+                old_customer.id,
+                action="reference-unassigned",
+                changes_summary=f"Reference contact unassigned: {contact.contact_name} ({contact.partner_name}).",
+                tag_name="assign",
+            )
+
+    if contact.customer_id:
+        _log_opportunity_history(
+            contact.customer_id,
+            action="reference-assigned",
+            changes_summary=f"Reference contact assigned: {contact.contact_name} ({contact.partner_name}).",
+            tag_name="assign",
+        )
+    db.session.commit()
+
+    q = (request.form.get("q") or "").strip()
+    partner = (request.form.get("partner") or "").strip()
+    sort = (request.form.get("sort") or "latest_activity_desc").strip()
+    page = request.form.get("page", type=int) or 1
+    flash("Reference assignment updated.", "success")
+    return redirect(url_for("crm.reference_list", q=q, partner=partner, sort=sort, page=page))
+
+
 @crm_bp.route("/customers/new", methods=["GET", "POST"])
 @crm_bp.route("/opportunities/new", methods=["GET", "POST"])
 def opportunity_new():
@@ -1649,6 +2047,40 @@ def opportunity_edit(customer_id):
     documents = CustomerDocument.query.filter_by(customer_id=customer.id).order_by(CustomerDocument.created_at.desc()).all()
     customer_diagrams = CustomerDiagram.query.filter_by(customer_id=customer.id).order_by(CustomerDiagram.created_at.desc()).all()
     gathering_requests = GatheringRequest.query.filter_by(customer_id=customer.id).order_by(GatheringRequest.created_at.desc()).all()
+    mapped_ref_ids = [
+        row.reference_contact_id
+        for row in PartnerReferenceOpportunity.query.filter_by(customer_id=customer.id).all()
+    ]
+    if mapped_ref_ids:
+        reference_contacts = (
+            PartnerReferenceContact.query
+            .filter(
+                db.or_(
+                    PartnerReferenceContact.customer_id == customer.id,
+                    PartnerReferenceContact.id.in_(mapped_ref_ids),
+                )
+            )
+            .order_by(PartnerReferenceContact.created_at.desc())
+            .all()
+        )
+    else:
+        reference_contacts = PartnerReferenceContact.query.filter_by(customer_id=customer.id).order_by(PartnerReferenceContact.created_at.desc()).all()
+    all_reference_contacts = PartnerReferenceContact.query.order_by(
+        PartnerReferenceContact.partner_name.asc(),
+        PartnerReferenceContact.contact_name.asc(),
+    ).all()
+    assigned_reference_ids = {r.id for r in reference_contacts}
+    ref_activity_map = {}
+    if reference_contacts:
+        ref_ids = [r.id for r in reference_contacts]
+        ref_activities = (
+            PartnerReferenceActivity.query
+            .filter(PartnerReferenceActivity.reference_contact_id.in_(ref_ids))
+            .order_by(PartnerReferenceActivity.created_at.desc())
+            .all()
+        )
+        for activity in ref_activities:
+            ref_activity_map.setdefault(activity.reference_contact_id, []).append(activity)
 
     if request.method == "POST":
         email = (request.form.get("email") or "").strip()
@@ -1672,6 +2104,10 @@ def opportunity_edit(customer_id):
                 block_storage_entries=block_storage_entries,
                 documents=documents,
                 gathering_requests=gathering_requests,
+                reference_contacts=reference_contacts,
+                ref_activity_map=ref_activity_map,
+                all_reference_contacts=all_reference_contacts,
+                assigned_reference_ids=assigned_reference_ids,
                 active_tab='info',
                 base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
             )
@@ -1696,6 +2132,10 @@ def opportunity_edit(customer_id):
                 block_storage_entries=block_storage_entries,
                 documents=documents,
                 gathering_requests=gathering_requests,
+                reference_contacts=reference_contacts,
+                ref_activity_map=ref_activity_map,
+                all_reference_contacts=all_reference_contacts,
+                assigned_reference_ids=assigned_reference_ids,
                 active_tab='info',
                 base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
             )
@@ -1759,6 +2199,10 @@ def opportunity_edit(customer_id):
                 block_storage_entries=block_storage_entries,
                 documents=documents,
                 gathering_requests=gathering_requests,
+                reference_contacts=reference_contacts,
+                ref_activity_map=ref_activity_map,
+                all_reference_contacts=all_reference_contacts,
+                assigned_reference_ids=assigned_reference_ids,
                 active_tab='info',
                 base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
             )
@@ -1783,6 +2227,10 @@ def opportunity_edit(customer_id):
                 block_storage_entries=block_storage_entries,
                 documents=documents,
                 gathering_requests=gathering_requests,
+                reference_contacts=reference_contacts,
+                ref_activity_map=ref_activity_map,
+                all_reference_contacts=all_reference_contacts,
+                assigned_reference_ids=assigned_reference_ids,
                 active_tab='info',
                 base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
             )
@@ -1821,10 +2269,237 @@ def opportunity_edit(customer_id):
         documents=documents,
         customer_diagrams=customer_diagrams,
         gathering_requests=gathering_requests,
+        reference_contacts=reference_contacts,
+        ref_activity_map=ref_activity_map,
+        all_reference_contacts=all_reference_contacts,
+        assigned_reference_ids=assigned_reference_ids,
         teams_auto_available=TeamsService(current_app).is_configured(),
         active_tab=request.args.get("tab", "info"),
         base_url=current_app.config.get("APP_BASE_URL", "http://127.0.0.1:5000"),
     )
+
+
+@crm_bp.route("/opportunities/<int:customer_id>/reference-contacts/add", methods=["POST"])
+def reference_contact_add(customer_id):
+    customer = Customer.query.get_or_404(customer_id)
+    partner_name = (request.form.get("partner_name") or "").strip()
+    contact_name = (request.form.get("contact_name") or "").strip()
+    if not partner_name or not contact_name:
+        flash("Partner name and contact name are required.", "error")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+    contact = PartnerReferenceContact(
+        customer_id=customer.id,
+        partner_name=partner_name,
+        contact_name=contact_name,
+        designation=(request.form.get("designation") or "").strip(),
+        email=(request.form.get("email") or "").strip(),
+        phone=(request.form.get("phone") or "").strip(),
+        city=(request.form.get("city") or "").strip(),
+        notes=(request.form.get("notes") or "").strip(),
+        is_active=True,
+    )
+    db.session.add(contact)
+    db.session.commit()
+    if not PartnerReferenceOpportunity.query.filter_by(
+        reference_contact_id=contact.id,
+        customer_id=customer.id,
+    ).first():
+        db.session.add(PartnerReferenceOpportunity(reference_contact_id=contact.id, customer_id=customer.id))
+        db.session.commit()
+
+    _log_opportunity_history(
+        customer.id,
+        action="reference-contact-added",
+        changes_summary=f"Reference contact added: {contact.contact_name} ({contact.partner_name}).",
+        tag_name="important",
+    )
+    db.session.commit()
+    flash("Reference contact added.", "success")
+    return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+
+@crm_bp.route("/opportunities/<int:customer_id>/reference-contacts/<int:contact_id>/edit", methods=["POST"])
+def reference_contact_edit(customer_id, contact_id):
+    customer = Customer.query.get_or_404(customer_id)
+    contact = PartnerReferenceContact.query.filter_by(id=contact_id, customer_id=customer.id).first_or_404()
+
+    partner_name = (request.form.get("partner_name") or "").strip()
+    contact_name = (request.form.get("contact_name") or "").strip()
+    if not partner_name or not contact_name:
+        flash("Partner name and contact name are required.", "error")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+    contact.partner_name = partner_name
+    contact.contact_name = contact_name
+    contact.designation = (request.form.get("designation") or "").strip()
+    contact.email = (request.form.get("email") or "").strip()
+    contact.phone = (request.form.get("phone") or "").strip()
+    contact.city = (request.form.get("city") or "").strip()
+    contact.notes = (request.form.get("notes") or "").strip()
+    contact.is_active = bool(request.form.get("is_active"))
+    db.session.commit()
+
+    _log_opportunity_history(
+        customer.id,
+        action="reference-contact-updated",
+        changes_summary=f"Reference contact updated: {contact.contact_name} ({contact.partner_name}).",
+        tag_name="update",
+    )
+    db.session.commit()
+    flash("Reference contact updated.", "success")
+    return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+
+@crm_bp.route("/opportunities/<int:customer_id>/reference-contacts/<int:contact_id>/delete", methods=["POST"])
+def reference_contact_delete(customer_id, contact_id):
+    customer = Customer.query.get_or_404(customer_id)
+    contact = PartnerReferenceContact.query.filter_by(id=contact_id, customer_id=customer.id).first_or_404()
+    contact_name = contact.contact_name
+    partner_name = contact.partner_name
+    PartnerReferenceActivity.query.filter_by(reference_contact_id=contact.id).delete(synchronize_session=False)
+    PartnerReferenceOpportunity.query.filter_by(reference_contact_id=contact.id).delete(synchronize_session=False)
+    db.session.delete(contact)
+    db.session.commit()
+
+    _log_opportunity_history(
+        customer.id,
+        action="reference-contact-deleted",
+        changes_summary=f"Reference contact deleted: {contact_name} ({partner_name}).",
+        tag_name="update",
+    )
+    db.session.commit()
+    flash("Reference contact deleted.", "success")
+    return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+
+@crm_bp.route("/opportunities/<int:customer_id>/reference-contacts/<int:contact_id>/activities/add", methods=["POST"])
+def reference_contact_activity_add(customer_id, contact_id):
+    customer = Customer.query.get_or_404(customer_id)
+    contact = PartnerReferenceContact.query.filter_by(id=contact_id, customer_id=customer.id).first_or_404()
+
+    summary = (request.form.get("summary") or "").strip()
+    if not summary:
+        flash("Activity summary is required.", "error")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+    activity_type = (request.form.get("activity_type") or "note").strip().lower()
+    if activity_type not in {"call", "meeting", "email", "whatsapp", "note"}:
+        activity_type = "note"
+
+    activity_date = None
+    activity_date_raw = (request.form.get("activity_date") or "").strip()
+    if activity_date_raw:
+        try:
+            activity_date = datetime.strptime(activity_date_raw, "%Y-%m-%dT%H:%M")
+        except ValueError:
+            activity_date = None
+
+    activity = PartnerReferenceActivity(
+        reference_contact_id=contact.id,
+        customer_id=customer.id,
+        activity_type=activity_type,
+        activity_date=activity_date,
+        summary=summary,
+        details=(request.form.get("details") or "").strip(),
+        next_action=(request.form.get("next_action") or "").strip(),
+        created_by=(current_user.username if getattr(current_user, "is_authenticated", False) else "system"),
+    )
+    db.session.add(activity)
+    db.session.commit()
+
+    _log_opportunity_history(
+        customer.id,
+        action="reference-activity-added",
+        changes_summary=f"Reference activity ({activity_type}) added for {contact.contact_name}: {summary}",
+        tag_name="meeting" if activity_type in {"call", "meeting"} else "update",
+    )
+    db.session.commit()
+    flash("Reference activity added.", "success")
+    return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+
+@crm_bp.route("/opportunities/<int:customer_id>/references/assign", methods=["POST"])
+def opportunity_reference_assign(customer_id):
+    customer = Customer.query.get_or_404(customer_id)
+    reference_contact_id = request.form.get("reference_contact_id", type=int)
+    reference = PartnerReferenceContact.query.get(reference_contact_id) if reference_contact_id else None
+    if not reference:
+        flash("Please select a valid reference contact.", "error")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+    existing = PartnerReferenceOpportunity.query.filter_by(
+        reference_contact_id=reference.id,
+        customer_id=customer.id,
+    ).first()
+    if existing:
+        flash("Reference is already assigned to this opportunity.", "error")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+    db.session.add(PartnerReferenceOpportunity(reference_contact_id=reference.id, customer_id=customer.id))
+    db.session.commit()
+    _log_opportunity_history(
+        customer.id,
+        action="reference-assigned",
+        changes_summary=f"Reference assigned to opportunity: {reference.contact_name} ({reference.partner_name}).",
+        tag_name="assign",
+    )
+    db.session.commit()
+    flash("Reference assigned to opportunity.", "success")
+    return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+
+@crm_bp.route("/opportunities/<int:customer_id>/references/<int:reference_id>/unassign", methods=["POST"])
+def opportunity_reference_unassign(customer_id, reference_id):
+    customer = Customer.query.get_or_404(customer_id)
+    reference = PartnerReferenceContact.query.get_or_404(reference_id)
+
+    link = PartnerReferenceOpportunity.query.filter_by(
+        reference_contact_id=reference.id,
+        customer_id=customer.id,
+    ).first()
+
+    changed = False
+    if link:
+        db.session.delete(link)
+        changed = True
+    elif reference.customer_id == customer.id:
+        reference.customer_id = None
+        changed = True
+
+    if not changed:
+        flash("Reference is not assigned to this opportunity.", "error")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+    db.session.commit()
+    _log_opportunity_history(
+        customer.id,
+        action="reference-unassigned",
+        changes_summary=f"Reference unassigned from opportunity: {reference.contact_name} ({reference.partner_name}).",
+        tag_name="assign",
+    )
+    db.session.commit()
+    flash("Reference unassigned from opportunity.", "success")
+    return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
+
+
+@crm_bp.route("/opportunities/<int:customer_id>/reference-activities/<int:activity_id>/delete", methods=["POST"])
+def reference_contact_activity_delete(customer_id, activity_id):
+    customer = Customer.query.get_or_404(customer_id)
+    activity = PartnerReferenceActivity.query.filter_by(id=activity_id, customer_id=customer.id).first_or_404()
+    activity_text = activity.summary
+    db.session.delete(activity)
+    db.session.commit()
+
+    _log_opportunity_history(
+        customer.id,
+        action="reference-activity-deleted",
+        changes_summary=f"Reference activity deleted: {activity_text}",
+        tag_name="update",
+    )
+    db.session.commit()
+    flash("Reference activity deleted.", "success")
+    return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="references"))
 
 
 @crm_bp.route("/opportunities/<int:customer_id>/status", methods=["POST"])
@@ -3264,6 +3939,49 @@ def _extract_template_macros(template):
     return sorted({k for k in found if k not in auto_keys})
 
 
+def _lead_sample_columns():
+    return ["lead_name", "email", "phone", "company", "city", "source", "tags", "notes"]
+
+
+def _upsert_lead_from_row(row, uploaded_from=None):
+    email = (row.get("email") or "").strip().lower()
+    if not email or not _is_valid_email(email):
+        return False
+
+    lead = Lead.query.filter_by(email=email).first()
+    if not lead:
+        lead = Lead(email=email)
+        db.session.add(lead)
+
+    lead.lead_name = (row.get("lead_name") or lead.lead_name or "").strip() or None
+    lead.phone = (row.get("phone") or lead.phone or "").strip() or None
+    lead.company = (row.get("company") or lead.company or "").strip() or None
+    lead.city = (row.get("city") or lead.city or "").strip() or None
+    lead.source = (row.get("source") or lead.source or uploaded_from or "").strip() or None
+    lead.tags = (row.get("tags") or lead.tags or "").strip() or None
+    lead.notes = (row.get("notes") or lead.notes or "").strip() or None
+    try:
+        lead.raw_payload = json.dumps(row, ensure_ascii=True)
+    except Exception:
+        lead.raw_payload = None
+    return True
+
+
+def _lead_macro_values(lead):
+    return {
+        "today": datetime.utcnow().date().isoformat(),
+        "lead_name": lead.lead_name or "",
+        "customer_name": lead.lead_name or "",
+        "account_name": lead.company or "",
+        "company": lead.company or "",
+        "email": lead.email or "",
+        "phone": lead.phone or "",
+        "city": lead.city or "",
+        "source": lead.source or "",
+        "tags": lead.tags or "",
+    }
+
+
 def _bulk_csv_log_dir():
     root = Path(current_app.root_path).parent
     log_dir = root / "uploads" / "bulk_csv_logs"
@@ -3353,6 +4071,27 @@ def template_csv_execution_download(execution_id, kind):
     return send_file(file_path, as_attachment=True, download_name=file_path.name, mimetype="text/plain")
 
 
+@crm_bp.route("/leads/csv-sample")
+@login_required
+def leads_csv_sample():
+    columns = _lead_sample_columns()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(columns)
+    writer.writerow([
+        "John Doe",
+        "john.doe@example.com",
+        "+91 9999999999",
+        "Example Corp",
+        "Bangalore",
+        "Website Campaign",
+        "promo,priority",
+        "Interested in cloud modernization",
+    ])
+    buf = io.BytesIO(output.getvalue().encode("utf-8"))
+    return send_file(buf, mimetype="text/csv", as_attachment=True, download_name="leads_sample.csv")
+
+
 @crm_bp.route("/templates", methods=["GET", "POST"])
 def template_list():
     def _render(anchor=None):
@@ -3400,6 +4139,31 @@ def template_list():
             per_page=10,
             error_out=False,
         )
+        lead_page = request.args.get("lead_page", 1, type=int)
+        lead_q = (request.args.get("lead_q") or "").strip()
+        lead_email_state = (request.args.get("lead_email_state") or "all").strip()
+        leads_query = Lead.query
+        if lead_q:
+            like = f"%{lead_q}%"
+            leads_query = leads_query.filter(
+                db.or_(
+                    Lead.lead_name.ilike(like),
+                    Lead.email.ilike(like),
+                    Lead.phone.ilike(like),
+                    Lead.company.ilike(like),
+                    Lead.city.ilike(like),
+                    Lead.source.ilike(like),
+                )
+            )
+        if lead_email_state == "emailed":
+            leads_query = leads_query.filter(Lead.last_emailed_at.isnot(None))
+        elif lead_email_state == "not_emailed":
+            leads_query = leads_query.filter(Lead.last_emailed_at.is_(None))
+        lead_pagination = leads_query.order_by(Lead.created_at.desc()).paginate(
+            page=lead_page,
+            per_page=10,
+            error_out=False,
+        )
         return render_template(
             "templates_list.html",
             tpl_pagination=tpl_pagination,
@@ -3414,6 +4178,10 @@ def template_list():
             history_pagination=history_pagination,
             unsubscribe_pagination=unsubscribe_pagination,
             bulk_exec_pagination=bulk_exec_pagination,
+            lead_pagination=lead_pagination,
+            lead_q=lead_q,
+            lead_email_state=lead_email_state,
+            leads_total_count=Lead.query.count(),
             scroll_to=anchor,
         )
 
@@ -3718,6 +4486,13 @@ def template_list():
                 flash(f"Failed to read CSV: {e}", "error")
                 return redirect(url_for("crm.template_list") + "#send-bulk-csv")
 
+            # Save rows into leads table first (user-required behavior).
+            lead_imported = 0
+            for row in csv_rows:
+                if _upsert_lead_from_row(row, uploaded_from=original_filename):
+                    lead_imported += 1
+            db.session.commit()
+
             # Determine required columns
             macro_keys = _extract_template_macros(template)
             required_cols = ["email"] + macro_keys
@@ -3850,10 +4625,158 @@ def template_list():
             db.session.commit()
             msg = (
                 f"CSV bulk execution completed. Total rows: {len(csv_rows)}, sent: {sent}, failed: {failed}, "
-                f"unsubscribed removed: {unsubscribed_rows}, excluded (invalid/no-mx/unsubscribed): {max(0, len(csv_rows) - len(mx_valid_rows))}."
+                f"unsubscribed removed: {unsubscribed_rows}, excluded (invalid/no-mx/unsubscribed): {max(0, len(csv_rows) - len(mx_valid_rows))}, "
+                f"leads imported/updated: {lead_imported}."
             )
             flash(msg, "success" if not failed else "error")
             return redirect(url_for("crm.template_list") + "#bulk-csv-history")
+
+        elif action == "upload_leads_csv":
+            csv_file = request.files.get("leads_csv_file")
+            if not csv_file or not csv_file.filename:
+                flash("Please choose a CSV file for leads upload.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            try:
+                file_name = secure_filename(csv_file.filename or "leads.csv")
+                content = csv_file.read().decode("utf-8-sig")
+                reader = csv.DictReader(io.StringIO(content))
+                rows = list(reader)
+                headers = [h.strip() for h in (reader.fieldnames or [])]
+            except Exception as e:
+                flash(f"Failed to read leads CSV: {e}", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            if "email" not in headers:
+                flash("Leads CSV must include 'email' column.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            if not rows:
+                flash("Leads CSV has no data rows.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            imported = skipped = 0
+            for row in rows:
+                if _upsert_lead_from_row(row, uploaded_from=file_name):
+                    imported += 1
+                else:
+                    skipped += 1
+            db.session.commit()
+            flash(f"Leads upload done: {imported} imported/updated, {skipped} skipped (invalid/missing email).", "success")
+            return redirect(url_for("crm.template_list") + "#leads-section")
+
+        elif action == "add_lead":
+            lead_email = (request.form.get("lead_email") or "").strip().lower()
+            if not _is_valid_email(lead_email):
+                flash("Valid lead email is required.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            existing = Lead.query.filter_by(email=lead_email).first()
+            if existing:
+                flash("Lead with this email already exists. Use edit to update.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            lead = Lead(
+                lead_name=(request.form.get("lead_name") or "").strip() or None,
+                email=lead_email,
+                phone=(request.form.get("lead_phone") or "").strip() or None,
+                company=(request.form.get("lead_company") or "").strip() or None,
+                city=(request.form.get("lead_city") or "").strip() or None,
+                source=(request.form.get("lead_source") or "").strip() or None,
+                tags=(request.form.get("lead_tags") or "").strip() or None,
+                notes=(request.form.get("lead_notes") or "").strip() or None,
+                is_active=bool(request.form.get("lead_is_active")),
+            )
+            db.session.add(lead)
+            db.session.commit()
+            flash("Lead added.", "success")
+            return redirect(url_for("crm.template_list") + "#leads-section")
+
+        elif action == "edit_lead":
+            lead_id = request.form.get("lead_id", type=int)
+            lead = Lead.query.get(lead_id) if lead_id else None
+            if not lead:
+                flash("Lead not found.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            lead_email = (request.form.get("lead_email") or "").strip().lower()
+            if not _is_valid_email(lead_email):
+                flash("Valid lead email is required.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            dup = Lead.query.filter(Lead.email == lead_email, Lead.id != lead.id).first()
+            if dup:
+                flash("Another lead already uses this email.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+
+            lead.lead_name = (request.form.get("lead_name") or "").strip() or None
+            lead.email = lead_email
+            lead.phone = (request.form.get("lead_phone") or "").strip() or None
+            lead.company = (request.form.get("lead_company") or "").strip() or None
+            lead.city = (request.form.get("lead_city") or "").strip() or None
+            lead.source = (request.form.get("lead_source") or "").strip() or None
+            lead.tags = (request.form.get("lead_tags") or "").strip() or None
+            lead.notes = (request.form.get("lead_notes") or "").strip() or None
+            lead.is_active = bool(request.form.get("lead_is_active"))
+            db.session.commit()
+            flash("Lead updated.", "success")
+            return redirect(url_for("crm.template_list") + "#leads-section")
+
+        elif action == "delete_lead":
+            lead_id = request.form.get("lead_id", type=int)
+            lead = Lead.query.get(lead_id) if lead_id else None
+            if not lead:
+                flash("Lead not found.", "error")
+                return redirect(url_for("crm.template_list") + "#leads-section")
+            db.session.delete(lead)
+            db.session.commit()
+            flash("Lead deleted.", "success")
+            return redirect(url_for("crm.template_list") + "#leads-section")
+
+        elif action == "send_lead_bulk_email":
+            template_id = request.form.get("template_id", type=int)
+            template = EmailTemplate.query.get(template_id) if template_id else None
+            if not template:
+                flash("Select a valid template for leads email.", "error")
+                return redirect(url_for("crm.template_list") + "#send-lead-bulk")
+
+            lead_send_state = (request.form.get("lead_send_state") or "all").strip()
+            leads_query = Lead.query.filter(Lead.is_active.is_(True), Lead.email.isnot(None), Lead.email != "")
+            if lead_send_state == "emailed":
+                leads_query = leads_query.filter(Lead.last_emailed_at.isnot(None))
+            elif lead_send_state == "not_emailed":
+                leads_query = leads_query.filter(Lead.last_emailed_at.is_(None))
+            leads = leads_query.all()
+            if not leads:
+                flash("No leads found for selected filter.", "error")
+                return redirect(url_for("crm.template_list") + "#send-lead-bulk")
+
+            sent = failed = 0
+            email_service = EmailService(current_app)
+            for lead in leads:
+                macro_values = _lead_macro_values(lead)
+                rendered_subject = render_macros(template.subject_template, macro_values)
+                rendered_body = render_macros(template.body_template, macro_values)
+                result = email_service.send_html_email(lead.email, rendered_subject, rendered_body)
+                lead.last_emailed_at = datetime.utcnow()
+                lead.last_email_status = result.status
+                db.session.add(EmailLog(
+                    customer_id=None,
+                    template_id=template.id,
+                    recipient_email=lead.email,
+                    email_type="lead-bulk",
+                    subject=rendered_subject,
+                    body=rendered_body,
+                    status=result.status,
+                    error_message=result.error,
+                ))
+                if result.success or result.status == "dev-mode":
+                    sent += 1
+                else:
+                    failed += 1
+            db.session.commit()
+            flash(f"Lead promotional bulk email done: {sent} sent, {failed} failed.", "success" if not failed else "error")
+            return redirect(url_for("crm.template_list") + "#send-lead-bulk")
 
         return redirect(url_for("crm.template_list"))
 
