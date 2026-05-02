@@ -1,5 +1,24 @@
 {% extends 'base.html' %}
 {% block content %}
+<style>
+  /* Configuration page accordion: keep one section open at a time. */
+  .config-left .mobile-collapsible:not(.expanded) > :not(h3):not(.ce-label) {
+    display: none;
+  }
+
+  .config-left .mobile-collapsible.expanded > :not(h3):not(.ce-label) {
+    margin-top: 0.55rem;
+  }
+
+  /* Single-section view: show only the currently selected section card. */
+  .config-left.single-section-mode .mobile-collapsible {
+    display: none;
+  }
+
+  .config-left.single-section-mode .mobile-collapsible.expanded {
+    display: block;
+  }
+</style>
 <section class="panel">
   <h2>Configuration</h2>
   <p class="hint">Use the right panel to jump to section. Make add, update, and delete changes from the left panel.</p>
@@ -259,11 +278,18 @@
                           <input name="name" required value="{{ t.name }}">
                         </label>
                         <label class="full">Subject
-                          <input name="subject_template" required value="{{ t.subject_template }}">
+                          <input id="cfgTplSubject-{{ t.id }}" name="subject_template" required value="{{ t.subject_template }}">
                         </label>
                         <label class="full">Body (HTML supported)
-                          <textarea name="body_template" rows="7" required>{{ t.body_template }}</textarea>
+                          <textarea id="cfgTplBody-{{ t.id }}" name="body_template" rows="7" required>{{ t.body_template }}</textarea>
                         </label>
+                        <div class="full">
+                          <button class="btn btn-secondary" type="button" onclick="toggleConfigTplPreview({{ t.id }})">Preview</button>
+                        </div>
+                        <div id="cfgTplPreviewWrap-{{ t.id }}" class="full" style="display:none;border:1px solid #d1d5db;border-radius:8px;background:#fff;padding:0.6rem;">
+                          <div style="font-size:0.82rem;margin-bottom:0.4rem;"><strong>Preview Subject:</strong> <span id="cfgTplPreviewSubject-{{ t.id }}"></span></div>
+                          <iframe id="cfgTplPreviewFrame-{{ t.id }}" sandbox="allow-same-origin" style="width:100%;min-height:220px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;"></iframe>
+                        </div>
                         <div class="tpl-form-actions">
                           <button class="btn" type="submit">Update Template</button>
                           <button class="btn btn-secondary" type="button" onclick="toggleConfigTplEdit({{ t.id }})">Cancel</button>
@@ -428,6 +454,56 @@
 </section>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+  var configLeft = document.querySelector('.config-left');
+  if (configLeft) {
+    configLeft.classList.add('single-section-mode');
+  }
+
+  var configSections = Array.from(document.querySelectorAll('.config-left .config-card.mobile-collapsible[id]'));
+
+  function openConfigSectionByElement(target) {
+    if (!target) return;
+    configSections.forEach(function(section) {
+      section.classList.remove('expanded');
+    });
+    target.classList.add('expanded');
+  }
+
+  function openConfigSectionById(id) {
+    if (!id) return;
+    var target = document.getElementById(id);
+    if (!target) return;
+    openConfigSectionByElement(target);
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // Default: open only the first config section.
+  if (configSections.length > 0) {
+    openConfigSectionByElement(configSections[0]);
+  }
+
+  // Menu-click behavior: open selected section and close the rest.
+  document.querySelectorAll('.config-right .config-links a[href^="#"]').forEach(function(link) {
+    link.addEventListener('click', function(evt) {
+      var href = link.getAttribute('href') || '';
+      var id = href.replace('#', '').trim();
+      if (!id) return;
+      evt.preventDefault();
+      openConfigSectionById(id);
+      if (history.replaceState) {
+        history.replaceState(null, '', '#' + id);
+      } else {
+        location.hash = id;
+      }
+    });
+  });
+
+  // If a hash is present, open that section on load.
+  var initialHash = (location.hash || '').replace('#', '').trim();
+  if (initialHash) {
+    openConfigSectionById(initialHash);
+  }
+
   document.querySelectorAll('.dynamic-badge').forEach(function(el) {
     var color = el.getAttribute('data-color');
     if (color) {
@@ -435,15 +511,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
 
-  if (window.innerWidth <= 760) {
-    document.querySelectorAll('.mobile-collapsible > h3').forEach(function(title) {
-      title.addEventListener('click', function() {
-        var card = title.closest('.mobile-collapsible');
-        if (!card) return;
-        card.classList.toggle('expanded');
-      });
+  // Header-click behavior: open clicked section (accordion mode).
+  document.querySelectorAll('.config-left .mobile-collapsible > h3').forEach(function(title) {
+    title.addEventListener('click', function() {
+      var card = title.closest('.mobile-collapsible');
+      if (!card) return;
+      openConfigSectionByElement(card);
     });
-  }
+  });
 
   var providerSelect = document.getElementById('ai_active_provider');
   function syncAiProviderFields() {
@@ -477,6 +552,80 @@ function toggleConfigTplEdit(id) {
     row.style.display = 'none';
   });
   target.style.display = show ? 'table-row' : 'none';
+
+  if (show) {
+    bindConfigTplPreviewInputs(id);
+    updateConfigTplPreview(id, false);
+  }
+}
+
+function buildConfigTplPreviewHtml(bodyHtml) {
+  var logoUrl = '{{ url_for('static', filename='ambifologo.png') }}';
+  return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<style>body{margin:0;background:#f5f7fb;font-family:Segoe UI,Tahoma,Arial,sans-serif;color:#1f2937;} .mail-wrap{padding:18px 12px;} .mail-card{max-width:700px;margin:0 auto;background:#fff;border:1px solid #e7ecf3;border-radius:10px;overflow:hidden;} .mail-head{padding:16px 20px;border-bottom:1px solid #dbe7f6;background:linear-gradient(135deg,#f8fbff 0%,#ecf4ff 100%);text-align:center;} .mail-body{padding:20px;line-height:1.6;font-size:14px;} .mail-foot{padding:16px 20px;border-top:1px solid #edf2f7;background:#fbfcfe;font-size:13px;line-height:1.75;color:#1f2937;} .pill{display:inline-block;padding:2px 8px;border:1px solid #b9d1f2;border-radius:999px;background:#fff;margin-right:6px;font-size:11px;color:#315b92;} .link{color:#0f4fa8;text-decoration:none;} table{max-width:100%;}</style>'
+    + '</head><body><div class="mail-wrap"><div class="mail-card">'
+    + '<div class="mail-head">'
+    + '<img src="' + logoUrl + '" alt="Ambifo" style="height:42px;max-width:220px;display:block;margin:0 auto;">'
+    + '<div style="margin-top:8px;font-size:13px;font-weight:700;color:#0f2f5f;letter-spacing:0.02em;">AMBIFO TECHNOLOGY PVT LTD</div>'
+    + '<div style="margin-top:6px;line-height:1.5;">'
+    + '<span class="pill">Cloud Strategy</span>'
+    + '<span class="pill">Migration & Modernization</span>'
+    + '<span class="pill">DevOps</span>'
+    + '<span class="pill">AI/ML</span>'
+    + '</div></div>'
+    + '<div class="mail-body">' + bodyHtml + '</div>'
+    + '<div class="mail-foot">'
+    + '<div><strong>Website:</strong> <a class="link" href="https://www.ambifo.com" target="_blank" rel="noopener">www.ambifo.com</a></div>'
+    + '<div><strong>Email:</strong> <a class="link" href="mailto:support@ambifo.com">support@ambifo.com</a></div>'
+    + '<div><strong>Phone:</strong> +91 9148419502</div>'
+    + '<div><strong>Address:</strong> Building No 674, 18th Main, 3rd Phase, Front of New Land ISRO Quarter, Domlur, Bangalore - 560071</div>'
+    + '<div style="margin-top:8px;"><a href="https://www.linkedin.com/company/ambifo-technology" target="_blank" rel="noopener" title="LinkedIn" aria-label="LinkedIn" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:#0a66c2;color:#fff;text-decoration:none;font-weight:700;font-size:13px;line-height:1;">in</a></div>'
+    + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #e7ecf3;text-align:center;">'
+    + '<a href="#" style="display:inline-block;padding:6px 18px;background:#e74c3c;color:#fff;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;" title="Unsubscribe (link is personalized per recipient in actual emails)">Unsubscribe</a>'
+    + '<div style="margin-top:4px;font-size:11px;color:#9ca3af;">Click to unsubscribe from our emails. (Preview only &mdash; link is personalized in actual sent emails.)</div>'
+    + '</div>'
+    + '</div></div></div></body></html>';
+}
+
+function updateConfigTplPreview(id, forceShow) {
+  var wrap = document.getElementById('cfgTplPreviewWrap-' + id);
+  var subjectInput = document.getElementById('cfgTplSubject-' + id);
+  var bodyInput = document.getElementById('cfgTplBody-' + id);
+  var subjectEl = document.getElementById('cfgTplPreviewSubject-' + id);
+  var frame = document.getElementById('cfgTplPreviewFrame-' + id);
+  if (!wrap || !subjectInput || !bodyInput || !subjectEl || !frame) return;
+
+  if (forceShow) wrap.style.display = 'block';
+  if (wrap.style.display === 'none' || wrap.style.display === '') return;
+
+  var subject = (subjectInput.value || '').trim();
+  var body = (bodyInput.value || '').trim();
+  subjectEl.textContent = subject || '(No subject)';
+  frame.srcdoc = buildConfigTplPreviewHtml(body || '<p style="color:#6b7280;">(No body content)</p>');
+}
+
+function toggleConfigTplPreview(id) {
+  var wrap = document.getElementById('cfgTplPreviewWrap-' + id);
+  if (!wrap) return;
+  var show = wrap.style.display === 'none' || wrap.style.display === '';
+  wrap.style.display = show ? 'block' : 'none';
+  if (show) updateConfigTplPreview(id, true);
+}
+
+function bindConfigTplPreviewInputs(id) {
+  var subjectInput = document.getElementById('cfgTplSubject-' + id);
+  var bodyInput = document.getElementById('cfgTplBody-' + id);
+  if (!subjectInput || !bodyInput) return;
+
+  if (!subjectInput.dataset.previewBound) {
+    subjectInput.addEventListener('input', function() { updateConfigTplPreview(id, false); });
+    subjectInput.dataset.previewBound = '1';
+  }
+
+  if (!bodyInput.dataset.previewBound) {
+    bodyInput.addEventListener('input', function() { updateConfigTplPreview(id, false); });
+    bodyInput.dataset.previewBound = '1';
+  }
 }
 </script>
 {% endblock %}

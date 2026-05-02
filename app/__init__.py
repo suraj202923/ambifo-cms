@@ -162,6 +162,33 @@ def _ensure_runtime_schema_updates():
         if customer_col and customer_col.get("nullable") is False:
             db.session.execute(text("ALTER TABLE email_logs ALTER COLUMN customer_id DROP NOT NULL"))
 
+    if "email_unsubscribes" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE email_unsubscribes ("
+            "id SERIAL PRIMARY KEY, "
+            "email VARCHAR(255) NOT NULL UNIQUE, "
+            "source VARCHAR(80), "
+            "unsubscribed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+
+    if "email_bulk_csv_executions" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE email_bulk_csv_executions ("
+            "id SERIAL PRIMARY KEY, "
+            "template_id INTEGER, "
+            "uploaded_filename VARCHAR(255) NOT NULL, "
+            "bad_log_filename VARCHAR(500) NOT NULL, "
+            "success_log_filename VARCHAR(500) NOT NULL, "
+            "total_rows INTEGER NOT NULL DEFAULT 0, "
+            "unsubscribed_rows INTEGER NOT NULL DEFAULT 0, "
+            "invalid_rows INTEGER NOT NULL DEFAULT 0, "
+            "sent_rows INTEGER NOT NULL DEFAULT 0, "
+            "failed_rows INTEGER NOT NULL DEFAULT 0, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+
     default_tags = [
         ("important", "#c0392b"),
         ("email", "#1d4ed8"),

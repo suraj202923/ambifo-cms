@@ -9,6 +9,12 @@ import re
 import secrets
 import signal
 import threading
+import uuid
+
+try:
+    import dns.resolver
+except Exception:
+    dns = None
 
 from flask import (
     Blueprint,
@@ -32,7 +38,9 @@ from app.models import (
     CustomerDiagram,
     CustomerDocument,
     CustomerSOW,
+    EmailBulkCsvExecution,
     EmailLog,
+    EmailUnsubscribe,
     EmailTemplate,
     GatheringBlockStorageDetail,
     GatheringFileNasDetail,
@@ -413,6 +421,7 @@ def require_login_for_crm_routes():
 
     allowed_endpoints = {
         "crm.login",
+        "crm.email_unsubscribe",
         "crm.gathering_form",
         "crm.gathering_form_sample_xlsx",
         "crm.gathering_form_sample_server_csv",
@@ -457,6 +466,42 @@ def logout():
     logout_user()
     flash("Logged out successfully.", "success")
     return redirect(url_for("crm.login"))
+
+
+@crm_bp.route("/email/unsubscribe", methods=["GET"])
+def email_unsubscribe():
+    token = (request.args.get("token") or "").strip()
+    svc = EmailService(current_app)
+    email = svc.resolve_unsubscribe_token(token)
+
+    if not email:
+        return render_template(
+            "email_unsubscribe.html",
+            success=False,
+            already=False,
+            email="",
+            message="Invalid or expired unsubscribe link.",
+        )
+
+    existing = EmailUnsubscribe.query.filter_by(email=email).first()
+    if existing:
+        return render_template(
+            "email_unsubscribe.html",
+            success=True,
+            already=True,
+            email=email,
+            message="This email is already unsubscribed.",
+        )
+
+    db.session.add(EmailUnsubscribe(email=email, source="footer-link"))
+    db.session.commit()
+    return render_template(
+        "email_unsubscribe.html",
+        success=True,
+        already=False,
+        email=email,
+        message="You have been unsubscribed successfully.",
+    )
 
 
 @crm_bp.route("/")
@@ -3210,6 +3255,104 @@ def opportunity_gathering_data_delete(customer_id, entry_id):
     return redirect(url_for("crm.opportunity_edit", customer_id=customer_id, tab="gathering"))
 
 
+def _extract_template_macros(template):
+    """Return sorted list of macro keys used in template subject + body (excluding auto-computed ones)."""
+    auto_keys = {"today", "gathering_form_link", "gathering_access_key", "gathering_expires_at",
+                 "meeting_availability_form_link", "meeting_availability_expires_at", "selected_diagrams_html"}
+    combined = f"{template.subject_template or ''} {template.body_template or ''}"
+    found = re.findall(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", combined)
+    return sorted({k for k in found if k not in auto_keys})
+
+
+def _bulk_csv_log_dir():
+    root = Path(current_app.root_path).parent
+    log_dir = root / "uploads" / "bulk_csv_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir
+
+
+def _safe_log_path(filename):
+    base = _bulk_csv_log_dir().resolve()
+    target = (base / filename).resolve()
+    if base not in target.parents and target != base:
+        return None
+    if not target.exists() or not target.is_file():
+        return None
+    return target
+
+
+def _email_has_mx(email_addr, cache):
+    if dns is None:
+        return False, "dnspython-not-installed"
+    domain = (email_addr.split("@", 1)[1] if "@" in email_addr else "").strip().lower()
+    if not domain:
+        return False, "invalid-domain"
+    if domain in cache:
+        return cache[domain]
+    try:
+        answers = dns.resolver.resolve(domain, "MX")
+        ok = bool(answers)
+        result = (ok, "ok" if ok else "no-mx")
+    except Exception:
+        result = (False, "mx-lookup-failed")
+    cache[domain] = result
+    return result
+
+
+@crm_bp.route("/templates/csv-sample")
+@login_required
+def template_csv_sample():
+    template_id = request.args.get("template_id", type=int)
+    if not template_id:
+        return jsonify({"error": "template_id required"}), 400
+    template = EmailTemplate.query.get(template_id)
+    if not template:
+        return jsonify({"error": "Template not found"}), 404
+
+    macro_keys = _extract_template_macros(template)
+    columns = ["email"] + macro_keys
+
+    # ?info=1 → return JSON column list for AJAX
+    if request.args.get("info"):
+        return jsonify({"columns": columns, "template_name": template.name})
+
+    # Return downloadable sample CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(columns)
+    sample_row = ["recipient@example.com"] + [f"sample_{k}" for k in macro_keys]
+    writer.writerow(sample_row)
+    csv_bytes = output.getvalue().encode("utf-8")
+    buf = io.BytesIO(csv_bytes)
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", template.name)
+    return send_file(buf, mimetype="text/csv", as_attachment=True,
+                     download_name=f"sample_{safe_name}.csv")
+
+
+@crm_bp.route("/templates/csv-executions/<int:execution_id>/download/<string:kind>")
+@login_required
+def template_csv_execution_download(execution_id, kind):
+    execution = EmailBulkCsvExecution.query.get(execution_id)
+    if not execution:
+        flash("Bulk CSV execution record not found.", "error")
+        return redirect(url_for("crm.template_list") + "#bulk-csv-history")
+
+    if kind == "bad":
+        filename = execution.bad_log_filename
+    elif kind == "success":
+        filename = execution.success_log_filename
+    else:
+        flash("Invalid log file type requested.", "error")
+        return redirect(url_for("crm.template_list") + "#bulk-csv-history")
+
+    file_path = _safe_log_path(filename)
+    if not file_path:
+        flash("Requested log file is missing.", "error")
+        return redirect(url_for("crm.template_list") + "#bulk-csv-history")
+
+    return send_file(file_path, as_attachment=True, download_name=file_path.name, mimetype="text/plain")
+
+
 @crm_bp.route("/templates", methods=["GET", "POST"])
 def template_list():
     def _render(anchor=None):
@@ -3245,6 +3388,18 @@ def template_list():
         history_pagination = EmailLog.query.order_by(EmailLog.created_at.desc()).paginate(
             page=hist_page, per_page=10, error_out=False
         )
+        unsub_page = request.args.get("unsub_page", 1, type=int)
+        unsubscribe_pagination = EmailUnsubscribe.query.order_by(EmailUnsubscribe.unsubscribed_at.desc()).paginate(
+            page=unsub_page,
+            per_page=10,
+            error_out=False,
+        )
+        bulk_page = request.args.get("bulk_page", 1, type=int)
+        bulk_exec_pagination = EmailBulkCsvExecution.query.order_by(EmailBulkCsvExecution.created_at.desc()).paginate(
+            page=bulk_page,
+            per_page=10,
+            error_out=False,
+        )
         return render_template(
             "templates_list.html",
             tpl_pagination=tpl_pagination,
@@ -3257,6 +3412,8 @@ def template_list():
             statuses=statuses,
             segments=segments,
             history_pagination=history_pagination,
+            unsubscribe_pagination=unsubscribe_pagination,
+            bulk_exec_pagination=bulk_exec_pagination,
             scroll_to=anchor,
         )
 
@@ -3532,6 +3689,171 @@ def template_list():
             db.session.commit()
             flash(f"Bulk email done: {sent} sent, {failed} failed.", "success" if not failed else "error")
             return redirect(url_for("crm.template_list") + "#send-bulk")
+
+        # Send bulk email via CSV upload
+        elif action == "send_bulk_csv":
+            template_id = request.form.get("template_id", type=int)
+            template = EmailTemplate.query.get(template_id) if template_id else None
+            if not template:
+                flash("Select a valid template before uploading CSV.", "error")
+                return redirect(url_for("crm.template_list") + "#send-bulk-csv")
+
+            if dns is None:
+                flash("dnspython is not installed on server. Install dependencies first to run MX validation.", "error")
+                return redirect(url_for("crm.template_list") + "#send-bulk-csv")
+
+            csv_file = request.files.get("csv_file")
+            if not csv_file or not csv_file.filename:
+                flash("Please upload a CSV file.", "error")
+                return redirect(url_for("crm.template_list") + "#send-bulk-csv")
+
+            # Read CSV
+            try:
+                original_filename = secure_filename(csv_file.filename or "bulk.csv")
+                content = csv_file.read().decode("utf-8-sig")
+                reader = csv.DictReader(io.StringIO(content))
+                csv_rows = list(reader)
+                csv_headers = [h.strip() for h in (reader.fieldnames or [])]
+            except Exception as e:
+                flash(f"Failed to read CSV: {e}", "error")
+                return redirect(url_for("crm.template_list") + "#send-bulk-csv")
+
+            # Determine required columns
+            macro_keys = _extract_template_macros(template)
+            required_cols = ["email"] + macro_keys
+            missing_cols = [c for c in required_cols if c not in csv_headers]
+            if missing_cols:
+                flash(
+                    f"CSV is missing required columns: {', '.join(missing_cols)}. "
+                    f"Expected: {', '.join(required_cols)}. Use the 'Download Sample CSV' button to get the correct format.",
+                    "error",
+                )
+                return redirect(url_for("crm.template_list") + "#send-bulk-csv")
+
+            if not csv_rows:
+                flash("CSV file has no data rows.", "error")
+                return redirect(url_for("crm.template_list") + "#send-bulk-csv")
+
+            if len(csv_rows) < 1:
+                flash("CSV must contain at least 1 recipient record.", "error")
+                return redirect(url_for("crm.template_list") + "#send-bulk-csv")
+
+            execution_token = f"exec_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+            bad_log_filename = f"{execution_token}_bad_emails.txt"
+            success_log_filename = f"{execution_token}_success_emails.txt"
+            bad_log_path = _bulk_csv_log_dir() / bad_log_filename
+            success_log_path = _bulk_csv_log_dir() / success_log_filename
+
+            unsubscribed_set = {
+                (row.email or "").strip().lower()
+                for row in EmailUnsubscribe.query.all()
+                if (row.email or "").strip()
+            }
+
+            email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+            mx_cache = {}
+
+            bad_lines = [f"Bulk CSV Execution: {execution_token}", f"Template: {template.name}", ""]
+            deliverable_rows = []
+            unsubscribed_rows = 0
+
+            # Step 1: syntax + unsubscribe checks
+            for idx, row in enumerate(csv_rows, start=2):
+                recipient = (row.get("email") or "").strip()
+                row_ref = f"Row {idx}"
+                if not recipient:
+                    bad_lines.append(f"{row_ref}: EMPTY_EMAIL")
+                    continue
+                if not email_re.match(recipient):
+                    bad_lines.append(f"{row_ref}: INVALID_SYNTAX -> {recipient}")
+                    continue
+                if recipient.lower() in unsubscribed_set:
+                    unsubscribed_rows += 1
+                    bad_lines.append(f"{row_ref}: UNSUBSCRIBED -> {recipient}")
+                    continue
+                deliverable_rows.append((idx, recipient, row))
+
+            # Step 2: MX checks
+            mx_valid_rows = []
+            for idx, recipient, row in deliverable_rows:
+                has_mx, reason = _email_has_mx(recipient, mx_cache)
+                if not has_mx:
+                    bad_lines.append(f"Row {idx}: MX_CHECK_FAILED({reason}) -> {recipient}")
+                    continue
+                mx_valid_rows.append((idx, recipient, row))
+
+            if not mx_valid_rows:
+                bad_log_path.write_text("\n".join(bad_lines) + "\n", encoding="utf-8")
+                success_log_path.write_text(
+                    f"Bulk CSV Execution: {execution_token}\nTemplate: {template.name}\n\nNo emails were sent.\n",
+                    encoding="utf-8",
+                )
+                execution = EmailBulkCsvExecution(
+                    template_id=template.id,
+                    uploaded_filename=original_filename,
+                    bad_log_filename=bad_log_filename,
+                    success_log_filename=success_log_filename,
+                    total_rows=len(csv_rows),
+                    unsubscribed_rows=unsubscribed_rows,
+                    invalid_rows=len(csv_rows),
+                    sent_rows=0,
+                    failed_rows=0,
+                )
+                db.session.add(execution)
+                db.session.commit()
+                flash("No sendable emails left after unsubscribe + MX validation. Download bad email log for details.", "error")
+                return redirect(url_for("crm.template_list") + "#bulk-csv-history")
+
+            # Send emails and keep success/bad logs
+            email_service = EmailService(current_app)
+            sent = failed = 0
+            success_lines = [f"Bulk CSV Execution: {execution_token}", f"Template: {template.name}", ""]
+            for idx, recipient, row in mx_valid_rows:
+                # Build macro values from CSV row (strip whitespace from all values)
+                mv = {k: (row.get(k) or "").strip() for k in csv_headers}
+                mv["today"] = datetime.utcnow().date().isoformat()
+                rendered_subject = render_macros(template.subject_template, mv)
+                rendered_body = render_macros(template.body_template, mv)
+                result = email_service.send_html_email(recipient, rendered_subject, rendered_body)
+                db.session.add(EmailLog(
+                    customer_id=None,
+                    template_id=template.id,
+                    recipient_email=recipient,
+                    email_type="csv-bulk",
+                    subject=rendered_subject,
+                    body=rendered_body,
+                    status=result.status,
+                    error_message=result.error,
+                ))
+                if result.success or result.status == "dev-mode":
+                    sent += 1
+                    success_lines.append(f"Row {idx}: SENT({result.status}) -> {recipient}")
+                else:
+                    failed += 1
+                    bad_lines.append(f"Row {idx}: SEND_FAILED({result.status}) -> {recipient} | {result.error or '-'}")
+
+            bad_log_path.write_text("\n".join(bad_lines) + "\n", encoding="utf-8")
+            success_log_path.write_text("\n".join(success_lines) + "\n", encoding="utf-8")
+
+            execution = EmailBulkCsvExecution(
+                template_id=template.id,
+                uploaded_filename=original_filename,
+                bad_log_filename=bad_log_filename,
+                success_log_filename=success_log_filename,
+                total_rows=len(csv_rows),
+                unsubscribed_rows=unsubscribed_rows,
+                invalid_rows=max(0, len(csv_rows) - len(mx_valid_rows)),
+                sent_rows=sent,
+                failed_rows=failed,
+            )
+            db.session.add(execution)
+            db.session.commit()
+            msg = (
+                f"CSV bulk execution completed. Total rows: {len(csv_rows)}, sent: {sent}, failed: {failed}, "
+                f"unsubscribed removed: {unsubscribed_rows}, excluded (invalid/no-mx/unsubscribed): {max(0, len(csv_rows) - len(mx_valid_rows))}."
+            )
+            flash(msg, "success" if not failed else "error")
+            return redirect(url_for("crm.template_list") + "#bulk-csv-history")
 
         return redirect(url_for("crm.template_list"))
 

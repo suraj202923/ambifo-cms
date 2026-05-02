@@ -9,10 +9,11 @@ from email.utils import formatdate
 
 from html import escape
 from urllib.parse import urlparse
+from itsdangerous import BadSignature, URLSafeSerializer
 
 from flask import has_request_context, request
 
-from app.models import SystemSetting
+from app.models import EmailUnsubscribe, SystemSetting
 
 
 class EmailResult:
@@ -90,6 +91,42 @@ class EmailService:
     def _logo_file_path(self):
         return Path(self.app.root_path).parent / "static" / "ambifologo.png"
 
+    def _unsubscribe_serializer(self):
+        secret_key = self.app.config.get("SECRET_KEY") or "ambifo-crm"
+        return URLSafeSerializer(secret_key, salt="email-unsubscribe")
+
+    def _build_unsubscribe_token(self, recipient_email):
+        normalized = (recipient_email or "").strip().lower()
+        if not normalized:
+            return ""
+        return self._unsubscribe_serializer().dumps({"email": normalized})
+
+    def resolve_unsubscribe_token(self, token):
+        if not token:
+            return None
+        try:
+            data = self._unsubscribe_serializer().loads(token)
+        except BadSignature:
+            return None
+        email = (data or {}).get("email")
+        if not email:
+            return None
+        normalized = str(email).strip().lower()
+        return normalized if normalized else None
+
+    def _build_unsubscribe_url(self, recipient_email):
+        token = self._build_unsubscribe_token(recipient_email)
+        if not token:
+            return ""
+        base_url = self._get_effective_app_base_url()
+        return f"{base_url}/email/unsubscribe?token={token}"
+
+    def _is_unsubscribed(self, recipient_email):
+        normalized = (recipient_email or "").strip().lower()
+        if not normalized:
+            return False
+        return EmailUnsubscribe.query.filter_by(email=normalized).first() is not None
+
     def _build_inline_logo_part(self):
         logo_path = self._logo_file_path()
         if not logo_path.exists():
@@ -113,12 +150,19 @@ class EmailService:
         # Keep simple fallback text for clients that prefer plain text.
         return "This email contains HTML content. Please view in an HTML-compatible email client."
 
-    def _wrap_with_ambifo_branding(self, html_body, logo_src=None):
+    def _wrap_with_ambifo_branding(self, html_body, logo_src=None, recipient_email=None):
         base_url = self._get_effective_app_base_url()
         logo_url = logo_src or f"{base_url}/static/ambifologo.png"
         body_html = html_body or ""
         company_address = "Building No 674, 18th Main, 3rd Phase, Front of New Land ISRO Quarter, Domlur, Bangalore - 560071"
         linkedin_url = "https://www.linkedin.com/company/ambifo-technology"
+        unsubscribe_url = self._build_unsubscribe_url(recipient_email)
+        unsubscribe_html = (
+            f'<div style="margin-top:10px;"><a href="{escape(unsubscribe_url)}" '
+            'style="display:inline-block;padding:6px 10px;border:1px solid #d0d7e2;border-radius:6px;'
+            'font-size:12px;color:#475569;text-decoration:none;background:#ffffff;">Unsubscribe</a></div>'
+            if unsubscribe_url else ""
+        )
 
         return f"""
 <div style=\"background:#f5f7fb;padding:18px 12px;\">
@@ -153,6 +197,7 @@ class EmailService:
                 <div style=\"margin-top:8px;\">
                     <a href=\"{escape(linkedin_url)}\" target=\"_blank\" rel=\"noopener\" title=\"LinkedIn\" aria-label=\"LinkedIn\" style=\"display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:#0a66c2;color:#ffffff;text-decoration:none;font-weight:700;font-size:13px;line-height:1;\">in</a>
                 </div>
+                {unsubscribe_html}
             </td>
         </tr>
     </table>
@@ -161,6 +206,13 @@ class EmailService:
 
     def send_html_email(self, to_email, subject, html_body, cc_emails=None, bcc_emails=None):
         host, username, password, port, use_tls, sender = self._get_effective_smtp_settings()
+
+        if self._is_unsubscribed(to_email):
+            return EmailResult(
+                success=False,
+                status="unsubscribed",
+                error="Recipient has unsubscribed from email communications.",
+            )
 
         if not host:
             return EmailResult(
@@ -191,7 +243,7 @@ class EmailService:
         logo_part, logo_cid = self._build_inline_logo_part()
         logo_src = f"cid:{logo_cid}" if logo_cid else None
         alt_part.attach(MIMEText(self._build_plain_text_fallback(html_body), "plain", "utf-8"))
-        alt_part.attach(MIMEText(self._wrap_with_ambifo_branding(html_body, logo_src=logo_src), "html", "utf-8"))
+        alt_part.attach(MIMEText(self._wrap_with_ambifo_branding(html_body, logo_src=logo_src, recipient_email=to_email), "html", "utf-8"))
         msg.attach(alt_part)
         if logo_part is not None:
             msg.attach(logo_part)
@@ -211,6 +263,13 @@ class EmailService:
                                         attachment_mime="application/octet-stream"):
         """Send HTML email with a binary file attachment."""
         host, username, password, port, use_tls, sender = self._get_effective_smtp_settings()
+
+        if self._is_unsubscribed(to_email):
+            return EmailResult(
+                success=False,
+                status="unsubscribed",
+                error="Recipient has unsubscribed from email communications.",
+            )
 
         if not host:
             return EmailResult(
@@ -241,7 +300,7 @@ class EmailService:
         logo_src = f"cid:{logo_cid}" if logo_cid else None
 
         alt_part.attach(MIMEText(self._build_plain_text_fallback(html_body), "plain", "utf-8"))
-        alt_part.attach(MIMEText(self._wrap_with_ambifo_branding(html_body, logo_src=logo_src), "html", "utf-8"))
+        alt_part.attach(MIMEText(self._wrap_with_ambifo_branding(html_body, logo_src=logo_src, recipient_email=to_email), "html", "utf-8"))
         related_part.attach(alt_part)
         if logo_part is not None:
             related_part.attach(logo_part)

@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="panel narrow">
+  <h2>Email Preferences</h2>
+  {% if success %}
+    <div class="alert success">{{ message }}</div>
+    <p class="hint">Email: <strong>{{ email }}</strong></p>
+    {% if already %}
+      <p class="hint">No action needed. This address is already excluded from future sends.</p>
+    {% else %}
+      <p class="hint">This address has been added to our unsubscribe list and will be filtered from future sends.</p>
+    {% endif %}
+  {% else %}
+    <div class="alert error">{{ message }}</div>
+    <p class="hint">Please contact support if you need help with your email preferences.</p>
+  {% endif %}
+</section>
+{% endblock %}

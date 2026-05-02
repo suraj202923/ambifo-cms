@@ -75,6 +75,33 @@ class EmailLog(db.Model):
     template = db.relationship("EmailTemplate", backref="email_logs")
 
 
+class EmailUnsubscribe(db.Model):
+    __tablename__ = "email_unsubscribes"
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), nullable=False, unique=True, index=True)
+    source = db.Column(db.String(80), nullable=True)
+    unsubscribed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class EmailBulkCsvExecution(db.Model):
+    __tablename__ = "email_bulk_csv_executions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("email_templates.id"), nullable=True)
+    uploaded_filename = db.Column(db.String(255), nullable=False)
+    bad_log_filename = db.Column(db.String(500), nullable=False)
+    success_log_filename = db.Column(db.String(500), nullable=False)
+    total_rows = db.Column(db.Integer, nullable=False, default=0)
+    unsubscribed_rows = db.Column(db.Integer, nullable=False, default=0)
+    invalid_rows = db.Column(db.Integer, nullable=False, default=0)
+    sent_rows = db.Column(db.Integer, nullable=False, default=0)
+    failed_rows = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    template = db.relationship("EmailTemplate", backref="csv_bulk_executions")
+
+
 class GatheringRequest(db.Model):
     __tablename__ = "gathering_requests"
 

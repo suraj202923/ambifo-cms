@@ -29,6 +29,43 @@
         </form>
       </section>
 
+      <section class="panel config-card mobile-collapsible" id="send-bulk-csv">
+        <h3>Send Bulk Email via CSV</h3>
+        <p class="hint">Select a template, download the sample CSV to see the required columns, fill in your recipient list, then upload the CSV to send personalised emails.</p>
+
+        <div class="grid-form">
+          <label>Template
+            <select id="csvTplSelect" onchange="onCsvTemplateChange(this.value)">
+              <option value="">-- Select Template --</option>
+              {% for t in all_templates %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+
+          <div id="csvSampleWrap" style="display:none;">
+            <a id="csvSampleLink" class="btn btn-secondary" href="#" download>Download Sample CSV</a>
+            <p class="hint" style="margin-top:4px;">Required columns: <span id="csvColList" style="font-weight:600;"></span></p>
+          </div>
+        </div>
+
+        <form id="csvBulkForm" method="post" enctype="multipart/form-data" class="grid-form" style="margin-top:0.75rem;">
+          <input type="hidden" name="action" value="send_bulk_csv">
+          <input type="hidden" name="template_id" id="csvFormTemplateId" value="">
+
+          <label class="full">Upload CSV
+            <input type="file" name="csv_file" id="csvFileInput" accept=".csv,text/csv" onchange="validateCsvFile(this)">
+          </label>
+
+          <div id="csvValidationMsg" style="display:none;padding:8px 10px;border-radius:6px;font-size:13px;"></div>
+
+          <button class="btn mobile-sticky-submit" type="submit" id="csvSendBtn" disabled
+                  onclick="return confirm('Send CSV bulk email to all valid rows? This cannot be undone.');">
+            Send Bulk Email from CSV
+          </button>
+        </form>
+      </section>
+
       <section class="panel config-card mobile-collapsible" id="send-custom">
         <h3>Send Custom Email</h3>
 
@@ -207,14 +244,116 @@
         {% endif %}
       </section>
 
+      <section class="panel config-card" id="bulk-csv-history">
+        <h3>Bulk CSV Execution History</h3>
+        {% if bulk_exec_pagination.items %}
+        <div class="table-wrap">
+          <table class="tpl-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Template</th>
+                <th>CSV File</th>
+                <th>Total Rows</th>
+                <th>Sent</th>
+                <th>Failed</th>
+                <th>Unsubscribed</th>
+                <th>Excluded</th>
+                <th>Logs</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for row in bulk_exec_pagination.items %}
+              <tr>
+                <td data-label="Date" style="white-space:nowrap;">{{ row.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td data-label="Template">{{ row.template.name if row.template else '-' }}</td>
+                <td data-label="CSV File">{{ row.uploaded_filename }}</td>
+                <td data-label="Total Rows">{{ row.total_rows }}</td>
+                <td data-label="Sent">{{ row.sent_rows }}</td>
+                <td data-label="Failed">{{ row.failed_rows }}</td>
+                <td data-label="Unsubscribed">{{ row.unsubscribed_rows }}</td>
+                <td data-label="Excluded">{{ row.invalid_rows }}</td>
+                <td data-label="Logs" style="white-space:nowrap;">
+                  <a class="mini-btn" href="{{ url_for('crm.template_csv_execution_download', execution_id=row.id, kind='bad') }}">Bad TXT</a>
+                  <a class="mini-btn" href="{{ url_for('crm.template_csv_execution_download', execution_id=row.id, kind='success') }}">Success TXT</a>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination">
+          {% if bulk_exec_pagination.has_prev %}
+            <a class="page-link" href="{{ url_for('crm.template_list', bulk_page=bulk_exec_pagination.prev_num) }}#bulk-csv-history">Previous</a>
+          {% else %}
+            <span class="page-link disabled">Previous</span>
+          {% endif %}
+          <span>Page {{ bulk_exec_pagination.page }} of {{ bulk_exec_pagination.pages }}</span>
+          {% if bulk_exec_pagination.has_next %}
+            <a class="page-link" href="{{ url_for('crm.template_list', bulk_page=bulk_exec_pagination.next_num) }}#bulk-csv-history">Next</a>
+          {% else %}
+            <span class="page-link disabled">Next</span>
+          {% endif %}
+        </div>
+        {% else %}
+          <p class="hint">No bulk CSV execution records yet.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel config-card" id="unsubscribe-history">
+        <h3>Unsubscribe Email List</h3>
+        {% if unsubscribe_pagination.items %}
+        <div class="table-wrap">
+          <table class="tpl-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Email</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for row in unsubscribe_pagination.items %}
+              <tr>
+                <td data-label="Date" style="white-space:nowrap;">{{ row.unsubscribed_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td data-label="Email">{{ row.email }}</td>
+                <td data-label="Source">{{ row.source or '-' }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination">
+          {% if unsubscribe_pagination.has_prev %}
+            <a class="page-link" href="{{ url_for('crm.template_list', unsub_page=unsubscribe_pagination.prev_num) }}#unsubscribe-history">Previous</a>
+          {% else %}
+            <span class="page-link disabled">Previous</span>
+          {% endif %}
+          <span>Page {{ unsubscribe_pagination.page }} of {{ unsubscribe_pagination.pages }}</span>
+          {% if unsubscribe_pagination.has_next %}
+            <a class="page-link" href="{{ url_for('crm.template_list', unsub_page=unsubscribe_pagination.next_num) }}#unsubscribe-history">Next</a>
+          {% else %}
+            <span class="page-link disabled">Next</span>
+          {% endif %}
+        </div>
+        {% else %}
+          <p class="hint">No unsubscribed emails recorded yet.</p>
+        {% endif %}
+      </section>
+
     </div>
 
     <aside class="panel config-right">
       <h3>Email Actions</h3>
       <div class="config-links">
         <a href="#send-bulk">Send Bulk Email</a>
+        <a href="#send-bulk-csv">Send Bulk Email via CSV</a>
         <a href="#send-custom">Send Custom Email</a>
         <a href="#email-history">Email History</a>
+        <a href="#bulk-csv-history">Bulk CSV Execution History</a>
+        <a href="#unsubscribe-history">Unsubscribe Email List</a>
         <a href="{{ url_for('crm.configuration') }}#email-template-config">Manage Templates</a>
       </div>
     </aside>
@@ -306,6 +445,122 @@
         });
       });
     }
+
+    // If redirected back to #send-bulk-csv with a flash, keep section visible
+    if (window.location.hash === '#send-bulk-csv') {
+      var sec = document.getElementById('send-bulk-csv');
+      if (sec) sec.classList.add('expanded');
+    }
   });
+
+  // --- CSV Bulk Email ---
+  var _csvRequiredCols = [];
+
+  function onCsvTemplateChange(templateId) {
+    var sampleWrap = document.getElementById('csvSampleWrap');
+    var sampleLink = document.getElementById('csvSampleLink');
+    var colList = document.getElementById('csvColList');
+    var formTplId = document.getElementById('csvFormTemplateId');
+    var fileInput = document.getElementById('csvFileInput');
+    var sendBtn = document.getElementById('csvSendBtn');
+    var msgEl = document.getElementById('csvValidationMsg');
+
+    // Reset
+    _csvRequiredCols = [];
+    if (fileInput) fileInput.value = '';
+    if (sendBtn) sendBtn.disabled = true;
+    if (msgEl) { msgEl.style.display = 'none'; msgEl.textContent = ''; }
+
+    if (!templateId) {
+      if (sampleWrap) sampleWrap.style.display = 'none';
+      if (formTplId) formTplId.value = '';
+      return;
+    }
+
+    if (formTplId) formTplId.value = templateId;
+
+    // Fetch column info
+    fetch('/templates/csv-sample?template_id=' + templateId + '&info=1')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _csvRequiredCols = data.columns || [];
+        if (colList) colList.textContent = _csvRequiredCols.join(', ');
+        if (sampleLink) sampleLink.href = '/templates/csv-sample?template_id=' + templateId;
+        if (sampleWrap) sampleWrap.style.display = 'block';
+      })
+      .catch(function() {
+        if (sampleWrap) sampleWrap.style.display = 'none';
+      });
+  }
+
+  function validateCsvFile(input) {
+    var sendBtn = document.getElementById('csvSendBtn');
+    var msgEl = document.getElementById('csvValidationMsg');
+    var tplId = document.getElementById('csvFormTemplateId');
+    if (!input.files || !input.files[0]) {
+      if (sendBtn) sendBtn.disabled = true;
+      return;
+    }
+    if (!tplId || !tplId.value) {
+      msgEl.textContent = 'Select a template first to load required columns.';
+      msgEl.style.cssText = 'display:block;padding:8px 10px;border-radius:6px;font-size:13px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;';
+      if (sendBtn) sendBtn.disabled = true;
+      input.value = '';
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var text = e.target.result;
+      var lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+      var errors = [];
+
+      // Parse header (handle BOM)
+      var headerLine = lines[0] ? lines[0].replace(/^\uFEFF/, '') : '';
+      var headers = headerLine.split(',').map(function(h) { return h.replace(/^"|"$/g, '').trim(); });
+
+      // Check required columns
+      var missing = _csvRequiredCols.filter(function(c) { return headers.indexOf(c) === -1; });
+      if (missing.length > 0) {
+        errors.push('Missing columns: ' + missing.join(', '));
+      }
+
+      var dataRows = lines.slice(1).filter(function(l) { return l.trim(); }).length;
+      if (dataRows < 1) {
+        errors.push('CSV must contain at least 1 data row.');
+      }
+
+      // Validate email column values
+      var emailIdx = headers.indexOf('email');
+      var emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      var invalidRows = [];
+      for (var i = 1; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line) continue;
+        // Simple CSV split (handles basic quoting)
+        var cols = line.split(',').map(function(c) { return c.replace(/^"|"$/g, '').trim(); });
+        if (emailIdx >= 0) {
+          var emailVal = cols[emailIdx] || '';
+          if (!emailRe.test(emailVal)) {
+            invalidRows.push('Row ' + (i + 1) + ': "' + emailVal + '"');
+          }
+        }
+      }
+      if (invalidRows.length > 0) {
+        errors.push('Invalid emails (' + invalidRows.length + '): ' + invalidRows.slice(0, 5).join('; ') + (invalidRows.length > 5 ? '…' : ''));
+      }
+
+      if (errors.length > 0) {
+        msgEl.innerHTML = '<strong>Validation errors:</strong><ul style="margin:4px 0 0 16px;">' +
+          errors.map(function(e) { return '<li>' + e + '</li>'; }).join('') + '</ul>';
+        msgEl.style.cssText = 'display:block;padding:8px 10px;border-radius:6px;font-size:13px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;';
+        if (sendBtn) sendBtn.disabled = true;
+      } else {
+        msgEl.textContent = 'CSV looks valid. ' + dataRows + ' recipient row(s) ready to send.';
+        msgEl.style.cssText = 'display:block;padding:8px 10px;border-radius:6px;font-size:13px;background:#f0fdf4;border:1px solid #86efac;color:#166534;';
+        if (sendBtn) sendBtn.disabled = false;
+      }
+    };
+    reader.readAsText(input.files[0]);
+  }
 </script>
 {% endblock %}
