@@ -8,6 +8,8 @@
     </div>
   </div>
 
+  <div id="dbImportantAlert" class="dashboard-important-alert" style="display:none;"></div>
+
   <div class="dashboard-layout">
     <div class="dashboard-main">
       <div class="dashboard-top-metrics">
@@ -36,7 +38,7 @@
     </div>
 
     <aside class="dashboard-side">
-      <details class="dashboard-collapsible">
+      <details id="dbChatHistoryPanel" class="dashboard-collapsible">
         <summary>Chat History</summary>
         <div class="dashboard-side-head">
           <div class="dashboard-side-controls">
@@ -151,6 +153,70 @@ function _renderUnifiedPie(id, payload) {
   _renderPie(id, merged.labels, merged.values);
 }
 
+function _shortText(text, maxLen) {
+  var t = String(text || '').trim();
+  if (!t) return '';
+  if (t.length <= maxLen) return t;
+  return t.slice(0, Math.max(0, maxLen - 3)) + '...';
+}
+
+function _buildOpportunityHistoryHref(item) {
+  var customerId = encodeURIComponent(item.customer_id || '');
+  var customerName = encodeURIComponent(item.customer_name || 'Opportunity');
+  return '/opportunities?open_history_customer_id=' + customerId + '&open_history_customer_name=' + customerName;
+}
+
+function showAllImportantUpdates() {
+  var tagEl = document.getElementById('dbHistoryTag');
+  if (tagEl) {
+    tagEl.value = 'important';
+  }
+  var panel = document.getElementById('dbChatHistoryPanel');
+  if (panel) {
+    panel.open = true;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  loadDashboardHistory();
+}
+
+function loadImportantAlert() {
+  fetch('/dashboard/history-data?tag=important&limit=3')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var box = document.getElementById('dbImportantAlert');
+      if (!box) return;
+      if (!data.success || !data.items || data.items.length === 0) {
+        box.style.display = 'none';
+        box.innerHTML = '';
+        return;
+      }
+      var itemsHtml = '';
+      data.items.forEach(function(item){
+        var preview = _shortText(item.changes_summary || '', 120);
+        var href = _buildOpportunityHistoryHref(item);
+        itemsHtml += ''
+          + '<a class="dashboard-important-item" href="' + href + '">'
+          + '<div class="dashboard-important-title">' + escapeHtml(item.customer_name || 'Opportunity') + ' • ' + escapeHtml(item.created_at || '') + '</div>'
+          + '<div class="dashboard-important-text">' + escapeHtml(preview || 'No summary available.') + '</div>'
+          + '</a>';
+      });
+
+      box.innerHTML = ''
+        + '<div class="dashboard-important-label">Important Updates</div>'
+        + '<div class="dashboard-important-items">' + itemsHtml + '</div>'
+        + '<div class="dashboard-important-actions">'
+        + '<button class="btn btn-sm" type="button" onclick="showAllImportantUpdates()">See all important updates</button>'
+        + '</div>';
+      box.style.display = 'block';
+    })
+    .catch(function(){
+      var box = document.getElementById('dbImportantAlert');
+      if (!box) return;
+      box.style.display = 'none';
+      box.innerHTML = '';
+    });
+}
+
 function loadDashboardGraphs() {
   fetch('/dashboard/graph-data')
     .then(function(r){ return r.json(); })
@@ -254,6 +320,7 @@ function escapeHtml(str) {
 
 document.addEventListener('DOMContentLoaded', function(){
   loadDashboardGraphs();
+  loadImportantAlert();
   loadDashboardHistory();
 });
 </script>

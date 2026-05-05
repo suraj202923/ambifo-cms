@@ -462,6 +462,12 @@
     if (qs.get('quick_add') === '1') {
       openQuickAddModal();
     }
+
+    var openHistoryCustomerId = qs.get('open_history_customer_id');
+    if (openHistoryCustomerId) {
+      var openHistoryCustomerName = qs.get('open_history_customer_name') || 'Opportunity';
+      openHistoryModal(openHistoryCustomerId, openHistoryCustomerName);
+    }
   });
 
   function showModalMsg(text, type) {

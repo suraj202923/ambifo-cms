@@ -117,7 +117,7 @@
         </label>
       {% endif %}
 
-      <label class="full">Comment<textarea name="comment" rows="3">{{ fv.get('comment', customer.comment if customer else '') }}</textarea></label>
+      <label class="full">Comment<textarea name="comment" rows="6">{{ fv.get('comment', customer.comment if customer else '') }}</textarea></label>
       <label class="full">Next Action Planned<textarea name="next_action_planned" rows="3">{{ fv.get('next_action_planned', customer.next_action_planned if customer else '') }}</textarea></label>
 
       {% if is_edit %}
