@@ -110,6 +110,10 @@ def _ensure_runtime_schema_updates():
 
     if "opportunity_segments" in existing_tables:
         segment_columns = {col["name"] for col in inspector.get_columns("opportunity_segments")}
+        if "credit_percentage" not in segment_columns:
+            db.session.execute(text("ALTER TABLE opportunity_segments ADD COLUMN credit_percentage FLOAT"))
+        if "credit_on_arr" not in segment_columns:
+            db.session.execute(text("ALTER TABLE opportunity_segments ADD COLUMN credit_on_arr BOOLEAN NOT NULL DEFAULT FALSE"))
         if "credit_percentage_customer" not in segment_columns:
             db.session.execute(text("ALTER TABLE opportunity_segments ADD COLUMN credit_percentage_customer FLOAT"))
         if "credit_percentage_ambifo" not in segment_columns:
