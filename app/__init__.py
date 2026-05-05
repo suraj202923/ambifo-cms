@@ -93,10 +93,42 @@ def _ensure_runtime_schema_updates():
         customer_columns = {col["name"] for col in inspector.get_columns("customers")}
         if "cloud" not in customer_columns:
             db.session.execute(text("ALTER TABLE customers ADD COLUMN cloud VARCHAR(80)"))
+        if "alternate_emails" not in customer_columns:
+            db.session.execute(text("ALTER TABLE customers ADD COLUMN alternate_emails TEXT"))
         if "main_page_address" not in customer_columns:
             db.session.execute(text("ALTER TABLE customers ADD COLUMN main_page_address VARCHAR(255)"))
         if "billing" not in customer_columns:
             db.session.execute(text("ALTER TABLE customers ADD COLUMN billing VARCHAR(255)"))
+
+    if "opportunity_segments" in existing_tables:
+        segment_columns = {col["name"] for col in inspector.get_columns("opportunity_segments")}
+        if "credit_percentage_customer" not in segment_columns:
+            db.session.execute(text("ALTER TABLE opportunity_segments ADD COLUMN credit_percentage_customer FLOAT"))
+        if "credit_percentage_ambifo" not in segment_columns:
+            db.session.execute(text("ALTER TABLE opportunity_segments ADD COLUMN credit_percentage_ambifo FLOAT"))
+        if "credit_basis_mrr" not in segment_columns:
+            db.session.execute(text("ALTER TABLE opportunity_segments ADD COLUMN credit_basis_mrr BOOLEAN NOT NULL DEFAULT TRUE"))
+        if "credit_basis_arr" not in segment_columns:
+            db.session.execute(text("ALTER TABLE opportunity_segments ADD COLUMN credit_basis_arr BOOLEAN NOT NULL DEFAULT FALSE"))
+
+    if "opportunity_financials" not in existing_tables:
+        db.session.execute(text(
+            "CREATE TABLE opportunity_financials ("
+            "id SERIAL PRIMARY KEY, "
+            "customer_id INTEGER NOT NULL UNIQUE, "
+            "expected_mrr FLOAT, "
+            "expected_arr FLOAT, "
+            "expected_credit_customer FLOAT, "
+            "expected_credit_ambifo FLOAT, "
+            "actual_mrr FLOAT, "
+            "actual_arr FLOAT, "
+            "actual_credit_customer FLOAT, "
+            "actual_credit_ambifo FLOAT, "
+            "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+        db.session.execute(text("CREATE INDEX idx_opportunity_financials_customer_id ON opportunity_financials (customer_id)"))
 
     if "customer_sows" in existing_tables:
         sow_columns = {col["name"] for col in inspector.get_columns("customer_sows")}

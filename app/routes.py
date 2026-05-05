@@ -52,6 +52,7 @@ from app.models import (
     OpportunityHistory,
     OpportunityUpdateTag,
     OpportunityCloudOperator,
+    OpportunityFinancial,
     OpportunitySegment,
     OpportunityStatus,
     PartnerReferenceActivity,
@@ -400,6 +401,143 @@ def _to_float(value):
     if not raw:
         return None
     return float(raw)
+
+
+def _to_optional_float(value, label):
+    raw = str(value).strip() if value is not None else ""
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a valid number.")
+
+
+def _round_money(value):
+    if value is None:
+        return None
+    return round(float(value), 2)
+
+
+def _resolve_arr_value(mrr_value, arr_value):
+    if arr_value is not None:
+        return _round_money(arr_value)
+    if mrr_value is None:
+        return None
+    return _round_money(mrr_value * 12)
+
+
+def _compute_credit_value(base_value, credit_percentage):
+    if base_value is None or credit_percentage is None:
+        return None
+    return _round_money((base_value * credit_percentage) / 100.0)
+
+
+def _segment_credit_rule(segment_name):
+    name = (segment_name or "").strip()
+    if not name:
+        return None, False
+    seg = OpportunitySegment.query.filter_by(name=name).first()
+    if not seg:
+        return None, None, "mrr"
+
+    pct_customer = seg.credit_percentage_customer
+    pct_ambifo = seg.credit_percentage_ambifo
+
+    if pct_customer is None and seg.credit_percentage is not None:
+        pct_customer = seg.credit_percentage
+    if pct_ambifo is None and seg.credit_percentage is not None:
+        pct_ambifo = seg.credit_percentage
+
+    basis = "arr" if bool(seg.credit_basis_arr) else "mrr"
+    if bool(seg.credit_basis_arr) and bool(seg.credit_basis_mrr):
+        basis = "arr"
+    elif not bool(seg.credit_basis_arr) and not bool(seg.credit_basis_mrr):
+        basis = "mrr"
+
+    return pct_customer, pct_ambifo, basis
+
+
+def _build_financial_payload(form, segment_name):
+    expected_mrr = _to_optional_float(form.get("expected_mrr"), "Expected MRR")
+    expected_arr_input = _to_optional_float(form.get("expected_arr"), "Expected ARR")
+    actual_mrr = _to_optional_float(form.get("actual_mrr"), "Actual MRR")
+    actual_arr_input = _to_optional_float(form.get("actual_arr"), "Actual ARR")
+
+    expected_arr = _resolve_arr_value(expected_mrr, expected_arr_input)
+    actual_arr = _resolve_arr_value(actual_mrr, actual_arr_input)
+
+    credit_pct_customer, credit_pct_ambifo, basis = _segment_credit_rule(segment_name)
+    expected_credit_base = expected_arr if basis == "arr" else expected_mrr
+    actual_credit_base = actual_arr if basis == "arr" else actual_mrr
+
+    expected_credit_customer = _compute_credit_value(expected_credit_base, credit_pct_customer)
+    expected_credit_ambifo = _compute_credit_value(expected_credit_base, credit_pct_ambifo)
+    actual_credit_customer = _compute_credit_value(actual_credit_base, credit_pct_customer)
+    actual_credit_ambifo = _compute_credit_value(actual_credit_base, credit_pct_ambifo)
+
+    return {
+        "expected_mrr": _round_money(expected_mrr),
+        "expected_arr": expected_arr,
+        "expected_credit_customer": expected_credit_customer,
+        "expected_credit_ambifo": expected_credit_ambifo,
+        "actual_mrr": _round_money(actual_mrr),
+        "actual_arr": actual_arr,
+        "actual_credit_customer": actual_credit_customer,
+        "actual_credit_ambifo": actual_credit_ambifo,
+    }
+
+
+def _financial_change_lines(existing_financial, payload):
+    labels = {
+        "expected_mrr": "Expected MRR",
+        "expected_arr": "Expected ARR",
+        "expected_credit_customer": "Expected Credit To Customer",
+        "expected_credit_ambifo": "Expected Credit To Ambifo",
+        "actual_mrr": "Actual MRR",
+        "actual_arr": "Actual ARR",
+        "actual_credit_customer": "Actual Credit To Customer",
+        "actual_credit_ambifo": "Actual Credit To Ambifo",
+    }
+    lines = []
+    for key, label in labels.items():
+        old_value = getattr(existing_financial, key, None) if existing_financial else None
+        new_value = payload.get(key)
+        if old_value is None and new_value is None:
+            continue
+        if _round_money(old_value) != _round_money(new_value):
+            lines.append(f"{label}: '{'' if old_value is None else _round_money(old_value)}' -> '{'' if new_value is None else _round_money(new_value)}'")
+    return lines
+
+
+def _apply_financial_payload(customer_id, payload):
+    financial = OpportunityFinancial.query.filter_by(customer_id=customer_id).first()
+    if not financial:
+        financial = OpportunityFinancial(customer_id=customer_id)
+        db.session.add(financial)
+
+    for key, value in payload.items():
+        setattr(financial, key, value)
+
+    return financial
+
+
+def _recalculate_financials_for_segment(segment_name):
+    customers = Customer.query.filter(Customer.segment == (segment_name or "").strip()).all()
+    for customer in customers:
+        financial = customer.financial_profile
+        if not financial:
+            continue
+        payload = _build_financial_payload(
+            {
+                "expected_mrr": financial.expected_mrr,
+                "expected_arr": financial.expected_arr,
+                "actual_mrr": financial.actual_mrr,
+                "actual_arr": financial.actual_arr,
+            },
+            customer.segment,
+        )
+        _apply_financial_payload(customer.id, payload)
 
 
 def _generate_access_key(length=8):
@@ -832,6 +970,7 @@ def opportunity_send_meeting_link(customer_id):
     required_data = (request.form.get("required_data") or "").strip()
     meeting_datetime = (request.form.get("meeting_datetime") or "").strip()
     remark = (request.form.get("remark") or "").strip()
+    include_alternate_cc = bool(request.form.get("include_alternate_cc"))
     teams_service = TeamsService(current_app)
     teams_is_configured = teams_service.is_configured()
 
@@ -843,6 +982,9 @@ def opportunity_send_meeting_link(customer_id):
     if invalid_emails:
         flash("Please enter valid recipient emails separated by comma.", "error")
         return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="meeting"))
+
+    alternate_cc_list = _customer_alternate_email_list(customer) if include_alternate_cc else []
+    cc_list = _merge_cc_lists(recipient_emails, manual_cc=[], alternate_cc=alternate_cc_list)
 
     meeting_start = None
     if meeting_datetime:
@@ -903,7 +1045,12 @@ def opportunity_send_meeting_link(customer_id):
     failed_count = 0
 
     for recipient_email in recipient_emails:
-        result = email_service.send_html_email(recipient_email, rendered_subject, rendered_body)
+        result = email_service.send_html_email(
+            recipient_email,
+            rendered_subject,
+            rendered_body,
+            cc_emails=cc_list,
+        )
         db.session.add(
             EmailLog(
                 customer_id=customer.id,
@@ -938,6 +1085,7 @@ def opportunity_send_meeting_link(customer_id):
         f"Teams meeting invite processed for {len(recipient_emails)} recipient(s).\n"
         f"Sent: {sent_count}, Failed: {failed_count}\n"
         f"Recipients: {', '.join(recipient_emails)}\n"
+        f"CC: {', '.join(cc_list) if cc_list else 'None'}\n"
         f"Link Source: {link_source}\n"
         f"Subject: {subject}\n"
         f"When: {meeting_when}\n"
@@ -1108,6 +1256,44 @@ def _is_valid_email(value):
     return re.match(pattern, value) is not None
 
 
+def _parse_email_list(raw_value):
+    raw = (raw_value or "").replace(";", ",").replace("\n", ",")
+    values = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    duplicate_values = []
+    unique_values = []
+    seen = set()
+    for item in values:
+        if item in seen:
+            if item not in duplicate_values:
+                duplicate_values.append(item)
+            continue
+        seen.add(item)
+        unique_values.append(item)
+    invalid_values = [item for item in unique_values if not _is_valid_email(item)]
+    valid_values = [item for item in unique_values if _is_valid_email(item)]
+    return valid_values, invalid_values, duplicate_values
+
+
+def _customer_alternate_email_list(customer):
+    if not customer:
+        return []
+    valid_values, _, _ = _parse_email_list(customer.alternate_emails or "")
+    return valid_values
+
+
+def _merge_cc_lists(primary_recipients, manual_cc=None, alternate_cc=None):
+    primary_set = {(item or "").strip().lower() for item in (primary_recipients or []) if item}
+    merged = []
+    seen = set()
+    for item in (manual_cc or []) + (alternate_cc or []):
+        normalized = (item or "").strip().lower()
+        if not normalized or normalized in primary_set or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(normalized)
+    return merged
+
+
 def _normalize_macro_key(value):
     key = re.sub(r"[^a-zA-Z0-9_]", "_", (value or "").strip().lower())
     key = re.sub(r"_+", "_", key).strip("_")
@@ -1125,6 +1311,7 @@ def opportunity_send_meeting_availability(customer_id):
     option_2_raw = (request.form.get("option_2") or "").strip()
     option_3_raw = (request.form.get("option_3") or "").strip()
     remark = (request.form.get("remark") or "").strip()
+    include_alternate_cc = bool(request.form.get("include_alternate_cc"))
 
     if not recipient_email or "@" not in recipient_email:
         flash("Please enter a valid recipient email.", "error")
@@ -1185,7 +1372,14 @@ def opportunity_send_meeting_availability(customer_id):
     )
     tpl, rendered_subject, rendered_body = _render_system_email_template("meeting_availability", template_macro_values)
 
-    result = EmailService(current_app).send_html_email(recipient_email, rendered_subject, rendered_body)
+    alternate_cc_list = _customer_alternate_email_list(customer) if include_alternate_cc else []
+    cc_list = _merge_cc_lists([recipient_email], manual_cc=[], alternate_cc=alternate_cc_list)
+    result = EmailService(current_app).send_html_email(
+        recipient_email,
+        rendered_subject,
+        rendered_body,
+        cc_emails=cc_list,
+    )
     db.session.add(
         EmailLog(
             customer_id=customer.id,
@@ -1202,6 +1396,7 @@ def opportunity_send_meeting_availability(customer_id):
     history_summary = (
         "Meeting availability request sent with 3 one-click options.\n"
         f"To: {recipient_email}\n"
+        f"CC: {', '.join(cc_list) if cc_list else 'None'}\n"
         f"Option 1: {_format_option_dt(option_1_at)}\n"
         f"Option 2: {_format_option_dt(option_2_at)}\n"
         f"Option 3: {_format_option_dt(option_3_at)}\n"
@@ -1832,7 +2027,10 @@ def opportunity_new():
     email_templates = EmailTemplate.query.order_by(EmailTemplate.name.asc()).all()
 
     if request.method == "POST":
+        pending_form_data = request.form.to_dict(flat=True)
         email = (request.form.get("email") or "").strip()
+        alternate_emails_raw = (request.form.get("alternate_emails") or "").strip()
+        alternate_emails_list, invalid_alternate_emails, duplicate_alternate_emails = _parse_email_list(alternate_emails_raw)
         customer_name = (request.form.get("customer_name") or "").strip()
         if not email or not customer_name:
             flash("Opportunity name and email are required.", "error")
@@ -1845,6 +2043,49 @@ def opportunity_new():
                 cloud_options=cloud_options,
                 admin_users=admin_users,
                 email_templates=email_templates,
+                pending_form_data=pending_form_data,
+            )
+
+        if invalid_alternate_emails:
+            flash("Please enter valid alternate emails separated by comma.", "error")
+            return render_template(
+                "customer_form.html",
+                customer=None,
+                is_edit=False,
+                status_options=status_options,
+                segment_options=segment_options,
+                cloud_options=cloud_options,
+                admin_users=admin_users,
+                email_templates=email_templates,
+                pending_form_data=pending_form_data,
+            )
+
+        if duplicate_alternate_emails:
+            flash("Duplicate alternate emails are not allowed.", "error")
+            return render_template(
+                "customer_form.html",
+                customer=None,
+                is_edit=False,
+                status_options=status_options,
+                segment_options=segment_options,
+                cloud_options=cloud_options,
+                admin_users=admin_users,
+                email_templates=email_templates,
+                pending_form_data=pending_form_data,
+            )
+
+        if email and email.strip().lower() in set(alternate_emails_list):
+            flash("Alternate emails cannot be same as main email.", "error")
+            return render_template(
+                "customer_form.html",
+                customer=None,
+                is_edit=False,
+                status_options=status_options,
+                segment_options=segment_options,
+                cloud_options=cloud_options,
+                admin_users=admin_users,
+                email_templates=email_templates,
+                pending_form_data=pending_form_data,
             )
 
         if Customer.query.filter_by(email=email).first():
@@ -1863,6 +2104,20 @@ def opportunity_new():
         selected_status = (request.form.get("deal_status") or "").strip()
         selected_segment = (request.form.get("segment") or "").strip()
         selected_cloud = (request.form.get("cloud") or "").strip()
+        try:
+            financial_payload = _build_financial_payload(request.form, selected_segment)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return render_template(
+                "customer_form.html",
+                customer=None,
+                is_edit=False,
+                status_options=status_options,
+                segment_options=segment_options,
+                cloud_options=cloud_options,
+                admin_users=admin_users,
+                email_templates=email_templates,
+            )
         assigned_user_id = request.form.get("assign_to_user_id", type=int)
         send_welcome_email = bool(request.form.get("send_welcome_email"))
         welcome_template_id = request.form.get("welcome_template_id", type=int)
@@ -1879,6 +2134,7 @@ def opportunity_new():
                 cloud_options=cloud_options,
                 admin_users=admin_users,
                 email_templates=email_templates,
+                pending_form_data=pending_form_data,
             )
 
         if assigned_user_id:
@@ -1893,6 +2149,7 @@ def opportunity_new():
                     segment_options=segment_options,
                     admin_users=admin_users,
                     email_templates=email_templates,
+                    pending_form_data=pending_form_data,
                 )
 
         if send_welcome_email and not welcome_template_id:
@@ -1905,12 +2162,14 @@ def opportunity_new():
                 segment_options=segment_options,
                 admin_users=admin_users,
                 email_templates=email_templates,
+                pending_form_data=pending_form_data,
             )
 
         customer = Customer(
             account_name=(request.form.get("account_name") or "").strip(),
             customer_name=customer_name,
             email=email,
+            alternate_emails=", ".join(alternate_emails_list) if alternate_emails_list else None,
             phone=(request.form.get("phone") or "").strip(),
             cloud=selected_cloud,
             billing=(request.form.get("billing") or "").strip(),
@@ -1925,6 +2184,9 @@ def opportunity_new():
         )
 
         db.session.add(customer)
+        db.session.commit()
+
+        _apply_financial_payload(customer.id, financial_payload)
         db.session.commit()
 
         _log_opportunity_history(
@@ -2018,6 +2280,7 @@ def opportunity_new():
         admin_users=admin_users,
         email_templates=email_templates,
         history_entries=[],
+        pending_form_data=None,
     )
 
 
@@ -2082,8 +2345,13 @@ def opportunity_edit(customer_id):
         for activity in ref_activities:
             ref_activity_map.setdefault(activity.reference_contact_id, []).append(activity)
 
+    pending_form_data = None
+
     if request.method == "POST":
+        pending_form_data = request.form.to_dict(flat=True)
         email = (request.form.get("email") or "").strip()
+        alternate_emails_raw = (request.form.get("alternate_emails") or "").strip()
+        alternate_emails_list, invalid_alternate_emails, duplicate_alternate_emails = _parse_email_list(alternate_emails_raw)
         customer_name = (request.form.get("customer_name") or "").strip()
         if not email or not customer_name:
             flash("Opportunity name and email are required.", "error")
@@ -2110,6 +2378,91 @@ def opportunity_edit(customer_id):
                 assigned_reference_ids=assigned_reference_ids,
                 active_tab='info',
                 base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
+                pending_form_data=pending_form_data,
+            )
+
+        if invalid_alternate_emails:
+            flash("Please enter valid alternate emails separated by comma.", "error")
+            return render_template(
+                "customer_form.html",
+                customer=customer,
+                is_edit=True,
+                status_options=status_options,
+                segment_options=segment_options,
+                cloud_options=cloud_options,
+                admin_users=admin_users,
+                email_templates=email_templates,
+                history_entries=history_entries,
+                history_tag_colors=history_tag_colors,
+                update_tags=update_tags,
+                gathering_entries=gathering_entries,
+                file_nas_entries=file_nas_entries,
+                block_storage_entries=block_storage_entries,
+                documents=documents,
+                gathering_requests=gathering_requests,
+                reference_contacts=reference_contacts,
+                ref_activity_map=ref_activity_map,
+                all_reference_contacts=all_reference_contacts,
+                assigned_reference_ids=assigned_reference_ids,
+                active_tab='info',
+                base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
+                pending_form_data=pending_form_data,
+            )
+
+        if duplicate_alternate_emails:
+            flash("Duplicate alternate emails are not allowed.", "error")
+            return render_template(
+                "customer_form.html",
+                customer=customer,
+                is_edit=True,
+                status_options=status_options,
+                segment_options=segment_options,
+                cloud_options=cloud_options,
+                admin_users=admin_users,
+                email_templates=email_templates,
+                history_entries=history_entries,
+                history_tag_colors=history_tag_colors,
+                update_tags=update_tags,
+                gathering_entries=gathering_entries,
+                file_nas_entries=file_nas_entries,
+                block_storage_entries=block_storage_entries,
+                documents=documents,
+                gathering_requests=gathering_requests,
+                reference_contacts=reference_contacts,
+                ref_activity_map=ref_activity_map,
+                all_reference_contacts=all_reference_contacts,
+                assigned_reference_ids=assigned_reference_ids,
+                active_tab='info',
+                base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
+                pending_form_data=pending_form_data,
+            )
+
+        if email and email.strip().lower() in set(alternate_emails_list):
+            flash("Alternate emails cannot be same as main email.", "error")
+            return render_template(
+                "customer_form.html",
+                customer=customer,
+                is_edit=True,
+                status_options=status_options,
+                segment_options=segment_options,
+                cloud_options=cloud_options,
+                admin_users=admin_users,
+                email_templates=email_templates,
+                history_entries=history_entries,
+                history_tag_colors=history_tag_colors,
+                update_tags=update_tags,
+                gathering_entries=gathering_entries,
+                file_nas_entries=file_nas_entries,
+                block_storage_entries=block_storage_entries,
+                documents=documents,
+                gathering_requests=gathering_requests,
+                reference_contacts=reference_contacts,
+                ref_activity_map=ref_activity_map,
+                all_reference_contacts=all_reference_contacts,
+                assigned_reference_ids=assigned_reference_ids,
+                active_tab='info',
+                base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
+                pending_form_data=pending_form_data,
             )
 
         duplicate = Customer.query.filter(Customer.email == email, Customer.id != customer.id).first()
@@ -2138,12 +2491,14 @@ def opportunity_edit(customer_id):
                 assigned_reference_ids=assigned_reference_ids,
                 active_tab='info',
                 base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
+                pending_form_data=pending_form_data,
             )
 
         new_values = {
             "account_name": (request.form.get("account_name") or "").strip(),
             "customer_name": customer_name,
             "email": email,
+            "alternate_emails": ", ".join(alternate_emails_list),
             "phone": (request.form.get("phone") or "").strip(),
             "cloud": (request.form.get("cloud") or "").strip(),
             "billing": (request.form.get("billing") or "").strip(),
@@ -2157,10 +2512,41 @@ def opportunity_edit(customer_id):
             "assign_to_user_id": request.form.get("assign_to_user_id", type=int),
         }
 
+        try:
+            financial_payload = _build_financial_payload(request.form, new_values["segment"])
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return render_template(
+                "customer_form.html",
+                customer=customer,
+                is_edit=True,
+                status_options=status_options,
+                segment_options=segment_options,
+                cloud_options=cloud_options,
+                admin_users=admin_users,
+                email_templates=email_templates,
+                history_entries=history_entries,
+                history_tag_colors=history_tag_colors,
+                update_tags=update_tags,
+                gathering_entries=gathering_entries,
+                file_nas_entries=file_nas_entries,
+                block_storage_entries=block_storage_entries,
+                documents=documents,
+                gathering_requests=gathering_requests,
+                reference_contacts=reference_contacts,
+                ref_activity_map=ref_activity_map,
+                all_reference_contacts=all_reference_contacts,
+                assigned_reference_ids=assigned_reference_ids,
+                active_tab='info',
+                base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
+                pending_form_data=pending_form_data,
+            )
+
         field_labels = {
             "account_name": "Account Name",
             "customer_name": "Customer Name",
             "email": "Email",
+            "alternate_emails": "Alternate Emails",
             "phone": "Phone",
             "cloud": "Cloud",
             "billing": "Billing Address",
@@ -2179,6 +2565,8 @@ def opportunity_edit(customer_id):
             old_val = getattr(customer, field)
             if (old_val or "") != (new_val or ""):
                 changed_lines.append(f"{field_labels[field]}: '{old_val or ''}' -> '{new_val or ''}'")
+
+        changed_lines.extend(_financial_change_lines(customer.financial_profile, financial_payload))
 
         if not changed_lines:
             flash("No changes detected.", "error")
@@ -2205,6 +2593,7 @@ def opportunity_edit(customer_id):
                 assigned_reference_ids=assigned_reference_ids,
                 active_tab='info',
                 base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
+                pending_form_data=pending_form_data,
             )
 
         change_remark = (request.form.get("change_remark") or "").strip()
@@ -2233,10 +2622,13 @@ def opportunity_edit(customer_id):
                 assigned_reference_ids=assigned_reference_ids,
                 active_tab='info',
                 base_url=current_app.config.get('APP_BASE_URL', 'http://127.0.0.1:5000'),
+                pending_form_data=pending_form_data,
             )
 
         for field, new_val in new_values.items():
             setattr(customer, field, new_val)
+
+        _apply_financial_payload(customer.id, financial_payload)
 
         db.session.commit()
 
@@ -2276,6 +2668,7 @@ def opportunity_edit(customer_id):
         teams_auto_available=TeamsService(current_app).is_configured(),
         active_tab=request.args.get("tab", "info"),
         base_url=current_app.config.get("APP_BASE_URL", "http://127.0.0.1:5000"),
+        pending_form_data=None,
     )
 
 
@@ -3854,6 +4247,7 @@ def opportunity_delete(customer_id):
     CustomerDocument.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
     CustomerDiagram.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
     CustomerSOW.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
+    OpportunityFinancial.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
     EmailLog.query.filter_by(customer_id=customer_id).delete(synchronize_session=False)
 
     db.session.delete(customer)
@@ -5255,19 +5649,92 @@ def configuration():
 
         elif action == "add_segment":
             name = (request.form.get("segment_name") or "").strip()
+            credit_percentage_customer_raw = (request.form.get("segment_credit_percentage_customer") or "").strip()
+            credit_percentage_ambifo_raw = (request.form.get("segment_credit_percentage_ambifo") or "").strip()
+            credit_basis_mrr = bool(request.form.get("segment_credit_basis_mrr"))
+            credit_basis_arr = bool(request.form.get("segment_credit_basis_arr"))
+
+            if credit_basis_mrr and credit_basis_arr:
+                flash("Select only one basis: MRR or ARR.", "error")
+                return redirect(url_for("crm.configuration"))
+            if not credit_basis_mrr and not credit_basis_arr:
+                credit_basis_mrr = True
+
+            credit_percentage_customer = None
+            if credit_percentage_customer_raw:
+                try:
+                    credit_percentage_customer = float(credit_percentage_customer_raw)
+                except ValueError:
+                    flash("Credit % To Customer must be a valid number.", "error")
+                    return redirect(url_for("crm.configuration"))
+                if credit_percentage_customer < 0:
+                    flash("Credit % To Customer cannot be negative.", "error")
+                    return redirect(url_for("crm.configuration"))
+
+            credit_percentage_ambifo = None
+            if credit_percentage_ambifo_raw:
+                try:
+                    credit_percentage_ambifo = float(credit_percentage_ambifo_raw)
+                except ValueError:
+                    flash("Credit % To Ambifo must be a valid number.", "error")
+                    return redirect(url_for("crm.configuration"))
+                if credit_percentage_ambifo < 0:
+                    flash("Credit % To Ambifo cannot be negative.", "error")
+                    return redirect(url_for("crm.configuration"))
 
             if not name:
                 flash("Segment name is required.", "error")
             elif OpportunitySegment.query.filter_by(name=name).first():
                 flash("Segment already exists.", "error")
             else:
-                db.session.add(OpportunitySegment(name=name, is_active=True))
+                db.session.add(
+                    OpportunitySegment(
+                        name=name,
+                        credit_percentage_customer=credit_percentage_customer,
+                        credit_percentage_ambifo=credit_percentage_ambifo,
+                        credit_basis_mrr=credit_basis_mrr,
+                        credit_basis_arr=credit_basis_arr,
+                        is_active=True,
+                    )
+                )
                 db.session.commit()
                 flash("Segment added.", "success")
 
         elif action == "update_segment":
             segment_id = request.form.get("segment_id", type=int)
             name = (request.form.get("segment_name") or "").strip()
+            credit_percentage_customer_raw = (request.form.get("segment_credit_percentage_customer") or "").strip()
+            credit_percentage_ambifo_raw = (request.form.get("segment_credit_percentage_ambifo") or "").strip()
+            credit_basis_mrr = bool(request.form.get("segment_credit_basis_mrr"))
+            credit_basis_arr = bool(request.form.get("segment_credit_basis_arr"))
+
+            if credit_basis_mrr and credit_basis_arr:
+                flash("Select only one basis: MRR or ARR.", "error")
+                return redirect(url_for("crm.configuration"))
+            if not credit_basis_mrr and not credit_basis_arr:
+                credit_basis_mrr = True
+
+            credit_percentage_customer = None
+            if credit_percentage_customer_raw:
+                try:
+                    credit_percentage_customer = float(credit_percentage_customer_raw)
+                except ValueError:
+                    flash("Credit % To Customer must be a valid number.", "error")
+                    return redirect(url_for("crm.configuration"))
+                if credit_percentage_customer < 0:
+                    flash("Credit % To Customer cannot be negative.", "error")
+                    return redirect(url_for("crm.configuration"))
+
+            credit_percentage_ambifo = None
+            if credit_percentage_ambifo_raw:
+                try:
+                    credit_percentage_ambifo = float(credit_percentage_ambifo_raw)
+                except ValueError:
+                    flash("Credit % To Ambifo must be a valid number.", "error")
+                    return redirect(url_for("crm.configuration"))
+                if credit_percentage_ambifo < 0:
+                    flash("Credit % To Ambifo cannot be negative.", "error")
+                    return redirect(url_for("crm.configuration"))
 
             segment_obj = OpportunitySegment.query.get(segment_id)
             if not segment_obj:
@@ -5284,11 +5751,16 @@ def configuration():
                 else:
                     old_name = segment_obj.name
                     segment_obj.name = name
+                    segment_obj.credit_percentage_customer = credit_percentage_customer
+                    segment_obj.credit_percentage_ambifo = credit_percentage_ambifo
+                    segment_obj.credit_basis_mrr = credit_basis_mrr
+                    segment_obj.credit_basis_arr = credit_basis_arr
                     if old_name != name:
                         Customer.query.filter(Customer.segment == old_name).update(
                             {Customer.segment: name},
                             synchronize_session=False,
                         )
+                    _recalculate_financials_for_segment(name)
                     db.session.commit()
                     flash("Segment updated.", "success")
 
@@ -5298,10 +5770,24 @@ def configuration():
             if not segment_obj:
                 flash("Segment not found.", "error")
             else:
+                affected_customers = Customer.query.filter(Customer.segment == segment_obj.name).all()
                 Customer.query.filter(Customer.segment == segment_obj.name).update(
                     {Customer.segment: ""},
                     synchronize_session=False,
                 )
+                for customer in affected_customers:
+                    if not customer.financial_profile:
+                        continue
+                    payload = _build_financial_payload(
+                        {
+                            "expected_mrr": customer.financial_profile.expected_mrr,
+                            "expected_arr": customer.financial_profile.expected_arr,
+                            "actual_mrr": customer.financial_profile.actual_mrr,
+                            "actual_arr": customer.financial_profile.actual_arr,
+                        },
+                        "",
+                    )
+                    _apply_financial_payload(customer.id, payload)
                 db.session.delete(segment_obj)
                 db.session.commit()
                 flash("Segment deleted.", "success")
@@ -5842,6 +6328,7 @@ def opportunity_send_email(customer_id):
     email_source = (request.form.get("email_source") or "template").strip().lower()
     template_id = request.form.get("template_id", type=int)
     cc_raw = (request.form.get("cc_emails") or "").strip()
+    include_alternate_cc = bool(request.form.get("include_alternate_cc"))
     custom_subject = (request.form.get("custom_subject") or "").strip()
     custom_body = (request.form.get("custom_body") or "").strip()
 
@@ -5855,6 +6342,9 @@ def opportunity_send_email(customer_id):
 
     if not customer:
         return jsonify(success=False, message="Opportunity not found."), 404
+
+    alternate_cc_list = _customer_alternate_email_list(customer) if include_alternate_cc else []
+    cc_list = _merge_cc_lists([customer.email], manual_cc=cc_list, alternate_cc=alternate_cc_list)
 
     if email_source == "custom":
         if not custom_subject or not custom_body:
@@ -5921,6 +6411,7 @@ def send_template_email():
     if request.method == "POST":
         customer_id = request.form.get("customer_id", type=int)
         template_id = request.form.get("template_id", type=int)
+        include_alternate_cc = bool(request.form.get("include_alternate_cc"))
 
         customer = Customer.query.get(customer_id)
         template = EmailTemplate.query.get(template_id)
@@ -5937,8 +6428,21 @@ def send_template_email():
         rendered_subject = render_macros(template.subject_template, macro_values)
         rendered_body = render_macros(template.body_template, macro_values)
 
+        cc_list = []
+        if include_alternate_cc:
+            cc_list = _merge_cc_lists(
+                [customer.email],
+                manual_cc=[],
+                alternate_cc=_customer_alternate_email_list(customer),
+            )
+
         email_service = EmailService(current_app)
-        result = email_service.send_html_email(customer.email, rendered_subject, rendered_body)
+        result = email_service.send_html_email(
+            customer.email,
+            rendered_subject,
+            rendered_body,
+            cc_emails=cc_list,
+        )
 
         email_log = EmailLog(
             customer_id=customer.id,
@@ -5956,7 +6460,7 @@ def send_template_email():
             action="email-sent",
             changes_summary=(
                 f"Template email processed to {customer.email}. Template: {template.name}. "
-                f"Subject: {rendered_subject}. Status: {result.status}."
+                f"Subject: {rendered_subject}. CC: {', '.join(cc_list) if cc_list else 'None'}. Status: {result.status}."
             ),
             tag_name="email",
         )

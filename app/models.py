@@ -15,6 +15,7 @@ class Customer(db.Model):
     account_name = db.Column(db.String(255), nullable=True)
     customer_name = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(255), nullable=False, unique=True)
+    alternate_emails = db.Column(db.Text, nullable=True)
     phone = db.Column(db.String(100), nullable=True)
     cloud = db.Column(db.String(80), nullable=True)
     main_page_address = db.Column(db.String(255), nullable=True)
@@ -355,8 +356,36 @@ class OpportunitySegment(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False, unique=True)
+    credit_percentage = db.Column(db.Float, nullable=True)
+    credit_on_arr = db.Column(db.Boolean, nullable=False, default=False)
+    credit_percentage_customer = db.Column(db.Float, nullable=True)
+    credit_percentage_ambifo = db.Column(db.Float, nullable=True)
+    credit_basis_mrr = db.Column(db.Boolean, nullable=False, default=True)
+    credit_basis_arr = db.Column(db.Boolean, nullable=False, default=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OpportunityFinancial(db.Model):
+    __tablename__ = "opportunity_financials"
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, unique=True, index=True)
+
+    expected_mrr = db.Column(db.Float, nullable=True)
+    expected_arr = db.Column(db.Float, nullable=True)
+    expected_credit_customer = db.Column(db.Float, nullable=True)
+    expected_credit_ambifo = db.Column(db.Float, nullable=True)
+
+    actual_mrr = db.Column(db.Float, nullable=True)
+    actual_arr = db.Column(db.Float, nullable=True)
+    actual_credit_customer = db.Column(db.Float, nullable=True)
+    actual_credit_ambifo = db.Column(db.Float, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    customer = db.relationship("Customer", backref=db.backref("financial_profile", uselist=False))
 
 
 class OpportunityCloudOperator(db.Model):

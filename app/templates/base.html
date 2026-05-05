@@ -66,5 +66,164 @@
     </div>
   {% endif %}
   <script src="{{ url_for('static', filename='js/pwa-install.js') }}"></script>
+  <script>
+    (function() {
+      function getPostForms() {
+        return Array.from(document.querySelectorAll('form[method="post" i]'));
+      }
+
+      function isPersistableForm(form) {
+        if (!form) return false;
+        if (form.classList.contains('logout-form')) return false;
+        if (form.hasAttribute('data-no-persist')) return false;
+        return true;
+      }
+
+      function buildFormKey(form, index) {
+        var actionAttr = form.getAttribute('action') || window.location.pathname;
+        var actionPath = window.location.pathname;
+        try {
+          actionPath = new URL(actionAttr, window.location.origin).pathname;
+        } catch (e) {
+          actionPath = actionAttr;
+        }
+        var hiddenAction = '';
+        var hiddenActionInput = form.querySelector('input[name="action"]');
+        if (hiddenActionInput) hiddenAction = hiddenActionInput.value || '';
+        var formId = form.id || form.getAttribute('data-form-key') || String(index);
+        return ['ambifo-form-draft-v1', window.location.pathname, actionPath, hiddenAction, formId].join('|');
+      }
+
+      function serializeFormDraft(form) {
+        var data = {};
+        var radios = {};
+        Array.from(form.elements || []).forEach(function(el) {
+          if (!el || !el.name || el.disabled) return;
+          var type = (el.type || '').toLowerCase();
+          if (['password', 'file', 'submit', 'button', 'reset', 'image'].indexOf(type) !== -1) return;
+
+          if (type === 'radio') {
+            if (!(el.name in radios)) radios[el.name] = null;
+            if (el.checked) radios[el.name] = el.value;
+            return;
+          }
+
+          if (type === 'checkbox') {
+            data[el.name] = { t: 'checkbox', v: !!el.checked };
+            return;
+          }
+
+          if (el.tagName === 'SELECT' && el.multiple) {
+            var selected = Array.from(el.options || []).filter(function(o) { return o.selected; }).map(function(o) { return o.value; });
+            data[el.name] = { t: 'select-multiple', v: selected };
+            return;
+          }
+
+          data[el.name] = { t: 'value', v: el.value };
+        });
+
+        Object.keys(radios).forEach(function(name) {
+          data[name] = { t: 'radio', v: radios[name] };
+        });
+
+        return data;
+      }
+
+      function restoreFormDraft(form, data) {
+        if (!data || typeof data !== 'object') return;
+        var restoredAny = false;
+        Object.keys(data).forEach(function(name) {
+          var entry = data[name] || {};
+          var nodes = form.querySelectorAll('[name="' + CSS.escape(name) + '"]');
+          if (!nodes || !nodes.length) return;
+
+          if (entry.t === 'radio') {
+            Array.from(nodes).forEach(function(node) {
+              node.checked = entry.v !== null && node.value === entry.v;
+              restoredAny = true;
+            });
+            return;
+          }
+
+          if (entry.t === 'checkbox') {
+            Array.from(nodes).forEach(function(node) {
+              node.checked = !!entry.v;
+              restoredAny = true;
+            });
+            return;
+          }
+
+          if (entry.t === 'select-multiple') {
+            Array.from(nodes).forEach(function(node) {
+              if (!node.options) return;
+              Array.from(node.options).forEach(function(opt) {
+                opt.selected = Array.isArray(entry.v) && entry.v.indexOf(opt.value) !== -1;
+              });
+              restoredAny = true;
+            });
+            return;
+          }
+
+          Array.from(nodes).forEach(function(node) {
+            if ('value' in node) node.value = entry.v == null ? '' : entry.v;
+            restoredAny = true;
+          });
+        });
+        return restoredAny;
+      }
+
+      function showDraftRestoredNotice() {
+        var page = document.querySelector('.page');
+        if (!page) return;
+        var alerts = page.querySelector('.alerts');
+        var box = document.createElement('section');
+        box.className = 'alerts';
+        box.innerHTML = '<div class="alert success">Draft restored: your previous form values were recovered.</div>';
+        if (alerts) {
+          alerts.parentNode.insertBefore(box, alerts.nextSibling);
+        } else {
+          page.insertBefore(box, page.firstChild);
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        var forms = getPostForms();
+        var restoredDraftCount = 0;
+
+        forms.forEach(function(form, index) {
+          if (!isPersistableForm(form)) return;
+          var key = buildFormKey(form, index);
+          try {
+            var raw = sessionStorage.getItem(key);
+            if (!raw) return;
+            var payload = JSON.parse(raw);
+            if (restoreFormDraft(form, payload)) {
+              restoredDraftCount += 1;
+            }
+            sessionStorage.removeItem(key);
+          } catch (e) {
+            try { sessionStorage.removeItem(key); } catch (_) {}
+          }
+        });
+
+        if (restoredDraftCount > 0) {
+          showDraftRestoredNotice();
+        }
+
+        forms.forEach(function(form, index) {
+          if (!isPersistableForm(form)) return;
+          form.addEventListener('submit', function() {
+            var key = buildFormKey(form, index);
+            try {
+              var payload = serializeFormDraft(form);
+              sessionStorage.setItem(key, JSON.stringify(payload));
+            } catch (e) {
+              // Ignore draft persistence issues silently.
+            }
+          });
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -13,28 +13,43 @@
 
   <!-- ══ TAB 1: Information ══════════════════════════════ -->
   <div id="tab-info" class="tab-pane active">
+    {% set fv = pending_form_data|default({}, true) %}
+    {% set selected_cloud_value = fv.get('cloud', customer.cloud if customer else '') %}
+    {% set selected_segment_value = fv.get('segment', customer.segment if customer else '') %}
+    {% set selected_status_value = fv.get('deal_status', customer.deal_status if customer else '') %}
+    {% set selected_assign_value = fv.get('assign_to_user_id', customer.assign_to_user_id|string if customer and customer.assign_to_user_id else '') %}
     <form method="post" class="grid-form" style="margin-top:0.5rem;">
-      <label>Account Name<input name="account_name" value="{{ customer.account_name if customer else '' }}"></label>
-      <label>Customer Name<input name="customer_name" value="{{ customer.customer_name if customer else '' }}" required></label>
-      <label>Email<input type="email" name="email" value="{{ customer.email if customer else '' }}" required></label>
-      <label>Phone<input name="phone" value="{{ customer.phone if customer else '' }}"></label>
+      <label>Account Name<input name="account_name" value="{{ fv.get('account_name', customer.account_name if customer else '') }}"></label>
+      <label>Customer Name<input name="customer_name" value="{{ fv.get('customer_name', customer.customer_name if customer else '') }}" required></label>
+      <label>Email<input type="email" name="email" value="{{ fv.get('email', customer.email if customer else '') }}" required></label>
+      <label class="full">Alternate Emails (comma separated)
+        <input name="alternate_emails" value="{{ fv.get('alternate_emails', customer.alternate_emails if customer else '') }}" placeholder="alt1@example.com, alt2@example.com">
+      </label>
+      <label>Phone<input name="phone" value="{{ fv.get('phone', customer.phone if customer else '') }}"></label>
       <label>Cloud
         <select name="cloud">
           <option value="">Select cloud</option>
           {% for c in cloud_options %}
-            <option value="{{ c.name }}" {% if customer and customer.cloud == c.name %}selected{% endif %}>{{ c.name }}</option>
+            <option value="{{ c.name }}" {% if selected_cloud_value == c.name %}selected{% endif %}>{{ c.name }}</option>
           {% endfor %}
         </select>
       </label>
-      <label>Billing Address<input name="billing" value="{{ customer.billing if customer else '' }}"></label>
-      <label>City<input name="city" value="{{ customer.city if customer else '' }}"></label>
-      <label>Cloud ID<input name="aws_id" value="{{ customer.aws_id if customer else '' }}"></label>
-      <label>Opportunity ID<input name="opportunity_id" value="{{ customer.opportunity_id if customer else '' }}"></label>
+      <label>Billing Address<input name="billing" value="{{ fv.get('billing', customer.billing if customer else '') }}"></label>
+      <label>City<input name="city" value="{{ fv.get('city', customer.city if customer else '') }}"></label>
+      <label>Cloud ID<input name="aws_id" value="{{ fv.get('aws_id', customer.aws_id if customer else '') }}"></label>
+      <label>Opportunity ID<input name="opportunity_id" value="{{ fv.get('opportunity_id', customer.opportunity_id if customer else '') }}"></label>
       <label>Segment
         <select name="segment">
           <option value="">Select segment</option>
           {% for seg in segment_options %}
-            <option value="{{ seg.name }}" {% if customer and customer.segment == seg.name %}selected{% endif %}>{{ seg.name }}</option>
+            <option
+              value="{{ seg.name }}"
+              data-credit-percentage-customer="{{ seg.credit_percentage_customer if seg.credit_percentage_customer is not none else '' }}"
+              data-credit-percentage-ambifo="{{ seg.credit_percentage_ambifo if seg.credit_percentage_ambifo is not none else '' }}"
+              data-credit-basis-mrr="{{ '1' if seg.credit_basis_mrr else '0' }}"
+              data-credit-basis-arr="{{ '1' if seg.credit_basis_arr else '0' }}"
+              {% if selected_segment_value == seg.name %}selected{% endif %}
+            >{{ seg.name }}</option>
           {% endfor %}
         </select>
       </label>
@@ -42,7 +57,7 @@
         <select name="deal_status">
           <option value="">Select status</option>
           {% for s in status_options %}
-            <option value="{{ s.name }}" {% if customer and customer.deal_status == s.name %}selected{% endif %}>{{ s.name }}</option>
+            <option value="{{ s.name }}" {% if selected_status_value == s.name %}selected{% endif %}>{{ s.name }}</option>
           {% endfor %}
         </select>
       </label>
@@ -50,10 +65,42 @@
         <select name="assign_to_user_id">
           <option value="">Select admin user</option>
           {% for admin in admin_users %}
-            <option value="{{ admin.id }}" {% if customer and customer.assign_to_user_id == admin.id %}selected{% endif %}>{{ admin.username }}{% if admin.email %} ({{ admin.email }}){% endif %}</option>
+            <option value="{{ admin.id }}" {% if selected_assign_value == admin.id|string %}selected{% endif %}>{{ admin.username }}{% if admin.email %} ({{ admin.email }}){% endif %}</option>
           {% endfor %}
         </select>
       </label>
+
+      <div class="full" style="border:1px solid #dbe3ef;border-radius:10px;padding:0.55rem 0.7rem;background:#fafcff;">
+        <details id="financialSectionToggle">
+          <summary style="cursor:pointer;font-weight:700;color:#1f2937;">Financials (Expected / Actual)</summary>
+          <div class="grid-form" style="margin-top:0.65rem;">
+            <label>Expected MRR
+              <input type="number" step="0.01" min="0" name="expected_mrr" id="expected_mrr" value="{{ fv.get('expected_mrr', customer.financial_profile.expected_mrr if customer and customer.financial_profile and customer.financial_profile.expected_mrr is not none else '') }}" placeholder="0.00">
+            </label>
+            <label>Expected ARR
+              <input type="number" step="0.01" min="0" name="expected_arr" id="expected_arr" value="{{ fv.get('expected_arr', customer.financial_profile.expected_arr if customer and customer.financial_profile and customer.financial_profile.expected_arr is not none else '') }}" placeholder="Auto from MRR x 12">
+            </label>
+            <label>Expected Credit To Customer
+              <input type="number" step="0.01" min="0" name="expected_credit_customer" id="expected_credit_customer" value="{{ fv.get('expected_credit_customer', customer.financial_profile.expected_credit_customer if customer and customer.financial_profile and customer.financial_profile.expected_credit_customer is not none else '') }}" readonly>
+            </label>
+            <label>Expected Credit To Ambifo
+              <input type="number" step="0.01" min="0" name="expected_credit_ambifo" id="expected_credit_ambifo" value="{{ fv.get('expected_credit_ambifo', customer.financial_profile.expected_credit_ambifo if customer and customer.financial_profile and customer.financial_profile.expected_credit_ambifo is not none else '') }}" readonly>
+            </label>
+            <label>Actual MRR
+              <input type="number" step="0.01" min="0" name="actual_mrr" id="actual_mrr" value="{{ fv.get('actual_mrr', customer.financial_profile.actual_mrr if customer and customer.financial_profile and customer.financial_profile.actual_mrr is not none else '') }}" placeholder="0.00">
+            </label>
+            <label>Actual ARR
+              <input type="number" step="0.01" min="0" name="actual_arr" id="actual_arr" value="{{ fv.get('actual_arr', customer.financial_profile.actual_arr if customer and customer.financial_profile and customer.financial_profile.actual_arr is not none else '') }}" placeholder="Auto from MRR x 12">
+            </label>
+            <label>Actual Credit To Customer
+              <input type="number" step="0.01" min="0" name="actual_credit_customer" id="actual_credit_customer" value="{{ fv.get('actual_credit_customer', customer.financial_profile.actual_credit_customer if customer and customer.financial_profile and customer.financial_profile.actual_credit_customer is not none else '') }}" readonly>
+            </label>
+            <label>Actual Credit To Ambifo
+              <input type="number" step="0.01" min="0" name="actual_credit_ambifo" id="actual_credit_ambifo" value="{{ fv.get('actual_credit_ambifo', customer.financial_profile.actual_credit_ambifo if customer and customer.financial_profile and customer.financial_profile.actual_credit_ambifo is not none else '') }}" readonly>
+            </label>
+          </div>
+        </details>
+      </div>
 
       {% if not is_edit %}
         <label class="checkbox-row full">
@@ -70,8 +117,8 @@
         </label>
       {% endif %}
 
-      <label class="full">Comment<textarea name="comment" rows="3">{{ customer.comment if customer else '' }}</textarea></label>
-      <label class="full">Next Action Planned<textarea name="next_action_planned" rows="3">{{ customer.next_action_planned if customer else '' }}</textarea></label>
+      <label class="full">Comment<textarea name="comment" rows="3">{{ fv.get('comment', customer.comment if customer else '') }}</textarea></label>
+      <label class="full">Next Action Planned<textarea name="next_action_planned" rows="3">{{ fv.get('next_action_planned', customer.next_action_planned if customer else '') }}</textarea></label>
 
       {% if is_edit %}
         <label class="full">Change Remark <span class="hint-inline">(required when updating)</span>
@@ -650,6 +697,10 @@
         <label class="full">Remark (optional)
           <input name="remark" placeholder="Optional note for All Updates history">
         </label>
+        <label class="checkbox-row full">
+          <input type="checkbox" name="include_alternate_cc" value="1">
+          Include alternate emails in CC{% if customer and customer.alternate_emails %} ({{ customer.alternate_emails }}){% endif %}
+        </label>
         <button class="btn btn-sm mobile-sticky-submit" type="submit">Send Meeting Invite</button>
       </form>
       <p class="hint" style="margin-top:0.45rem;">This sends the invite email and logs an entry in All Updates history. Auto-generation is available only after Teams config is saved in Configuration page.</p>
@@ -668,6 +719,10 @@
         </label>
         <label>Option 3 *
           <input type="datetime-local" name="option_3" required>
+        </label>
+        <label class="checkbox-row full">
+          <input type="checkbox" name="include_alternate_cc" value="1">
+          Include alternate emails in CC{% if customer and customer.alternate_emails %} ({{ customer.alternate_emails }}){% endif %}
         </label>
         <button class="btn btn-sm mobile-sticky-submit" type="submit">Send Availability Options</button>
       </form>
@@ -923,6 +978,29 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   toggleWelcomeTemplate();
 
+  var expectedMrrEl = document.getElementById('expected_mrr');
+  var expectedArrEl = document.getElementById('expected_arr');
+  var actualMrrEl = document.getElementById('actual_mrr');
+  var actualArrEl = document.getElementById('actual_arr');
+  var segmentSelect = document.querySelector('select[name="segment"]');
+
+  if (expectedArrEl) {
+    expectedArrEl.addEventListener('input', function() {
+      expectedArrEl.dataset.manualEdit = expectedArrEl.value.trim() ? '1' : '';
+      updateFinancialDerivedFields();
+    });
+  }
+  if (actualArrEl) {
+    actualArrEl.addEventListener('input', function() {
+      actualArrEl.dataset.manualEdit = actualArrEl.value.trim() ? '1' : '';
+      updateFinancialDerivedFields();
+    });
+  }
+  if (expectedMrrEl) expectedMrrEl.addEventListener('input', updateFinancialDerivedFields);
+  if (actualMrrEl) actualMrrEl.addEventListener('input', updateFinancialDerivedFields);
+  if (segmentSelect) segmentSelect.addEventListener('change', updateFinancialDerivedFields);
+  updateFinancialDerivedFields();
+
   if (window.innerWidth <= 760) {
     document.querySelectorAll('.mobile-collapsible > .ce-label, .mobile-collapsible > h3').forEach(function(title) {
       title.style.cursor = 'pointer';
@@ -940,6 +1018,67 @@ function toggleWelcomeTemplate() {
   var bl = document.getElementById('welcome_template_block');
   if (!cb || !bl) return;
   bl.style.display = cb.checked ? 'block' : 'none';
+}
+
+function _round2(v) {
+  return Math.round(v * 100) / 100;
+}
+
+function _toNumberOrNull(raw) {
+  var text = (raw || '').toString().trim();
+  if (!text) return null;
+  var n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+function updateFinancialDerivedFields() {
+  var segmentSelect = document.querySelector('select[name="segment"]');
+  var expectedMrrEl = document.getElementById('expected_mrr');
+  var expectedArrEl = document.getElementById('expected_arr');
+  var actualMrrEl = document.getElementById('actual_mrr');
+  var actualArrEl = document.getElementById('actual_arr');
+  var expCustCreditEl = document.getElementById('expected_credit_customer');
+  var expAmbifoCreditEl = document.getElementById('expected_credit_ambifo');
+  var actCustCreditEl = document.getElementById('actual_credit_customer');
+  var actAmbifoCreditEl = document.getElementById('actual_credit_ambifo');
+
+  if (!segmentSelect || !expectedMrrEl || !expectedArrEl || !actualMrrEl || !actualArrEl || !expCustCreditEl || !expAmbifoCreditEl || !actCustCreditEl || !actAmbifoCreditEl) {
+    return;
+  }
+
+  var selectedOption = segmentSelect.options[segmentSelect.selectedIndex];
+  var pctCustomer = _toNumberOrNull(selectedOption ? selectedOption.getAttribute('data-credit-percentage-customer') : '');
+  var pctAmbifo = _toNumberOrNull(selectedOption ? selectedOption.getAttribute('data-credit-percentage-ambifo') : '');
+  var basisArr = selectedOption && selectedOption.getAttribute('data-credit-basis-arr') === '1';
+  var basisMrr = selectedOption && selectedOption.getAttribute('data-credit-basis-mrr') === '1';
+  var creditBasis = basisArr ? 'arr' : (basisMrr ? 'mrr' : 'mrr');
+
+  var expectedMrr = _toNumberOrNull(expectedMrrEl.value);
+  var expectedArr = _toNumberOrNull(expectedArrEl.value);
+  var actualMrr = _toNumberOrNull(actualMrrEl.value);
+  var actualArr = _toNumberOrNull(actualArrEl.value);
+
+  if (expectedMrr !== null && !expectedArrEl.dataset.manualEdit) {
+    expectedArr = _round2(expectedMrr * 12);
+    expectedArrEl.value = expectedArr.toFixed(2);
+  }
+  if (actualMrr !== null && !actualArrEl.dataset.manualEdit) {
+    actualArr = _round2(actualMrr * 12);
+    actualArrEl.value = actualArr.toFixed(2);
+  }
+
+  var expectedBase = creditBasis === 'arr' ? expectedArr : expectedMrr;
+  var actualBase = creditBasis === 'arr' ? actualArr : actualMrr;
+
+  var expectedCreditCustomer = (pctCustomer !== null && expectedBase !== null) ? _round2((expectedBase * pctCustomer) / 100) : null;
+  var expectedCreditAmbifo = (pctAmbifo !== null && expectedBase !== null) ? _round2((expectedBase * pctAmbifo) / 100) : null;
+  var actualCreditCustomer = (pctCustomer !== null && actualBase !== null) ? _round2((actualBase * pctCustomer) / 100) : null;
+  var actualCreditAmbifo = (pctAmbifo !== null && actualBase !== null) ? _round2((actualBase * pctAmbifo) / 100) : null;
+
+  expCustCreditEl.value = expectedCreditCustomer === null ? '' : expectedCreditCustomer.toFixed(2);
+  expAmbifoCreditEl.value = expectedCreditAmbifo === null ? '' : expectedCreditAmbifo.toFixed(2);
+  actCustCreditEl.value = actualCreditCustomer === null ? '' : actualCreditCustomer.toFixed(2);
+  actAmbifoCreditEl.value = actualCreditAmbifo === null ? '' : actualCreditAmbifo.toFixed(2);
 }
 
 function setHistoryFilter(action, btn) {

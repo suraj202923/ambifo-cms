@@ -43,7 +43,7 @@
 
         <hr>
         <h4>Send Test Email</h4>
-        <form method="post" class="inline-form">
+        <form method="post" class="inline-form segment-inline-form">
           <input type="hidden" name="action" value="test_smtp">
           <input type="email" name="test_email_to" placeholder="test@example.com" required>
           <button class="btn" type="submit">Send Test</button>
@@ -317,7 +317,7 @@
 
         <div class="status-list">
           {% for s in statuses %}
-            <form method="post" class="row-editor">
+            <form method="post" class="row-editor segment-row-editor">
               <input type="hidden" name="status_id" value="{{ s.id }}">
               <span class="status-badge dynamic-badge" data-color="{{ s.color }}">{{ s.name }}</span>
               <input name="status_name" value="{{ s.name }}" required>
@@ -333,17 +333,37 @@
 
       <section class="panel config-card mobile-collapsible" id="segment-config">
         <h3>Segment</h3>
-        <form method="post" class="inline-form">
+        <form method="post" class="inline-form segment-inline-form">
           <input type="hidden" name="action" value="add_segment">
           <input name="segment_name" placeholder="New segment name" required>
+          <input type="number" name="segment_credit_percentage_customer" step="0.01" min="0" placeholder="Credit % Customer">
+          <input type="number" name="segment_credit_percentage_ambifo" step="0.01" min="0" placeholder="Credit % Ambifo">
+          <label class="checkbox-row" style="margin:0;">
+            <input type="checkbox" name="segment_credit_basis_mrr" value="1" checked>
+            MRR
+          </label>
+          <label class="checkbox-row" style="margin:0;">
+            <input type="checkbox" name="segment_credit_basis_arr" value="1">
+            ARR
+          </label>
           <button class="btn" type="submit">Add</button>
         </form>
 
         <div class="status-list">
           {% for seg in segments %}
-            <form method="post" class="row-editor">
+            <form method="post" class="row-editor segment-row-editor">
               <input type="hidden" name="segment_id" value="{{ seg.id }}">
               <input name="segment_name" value="{{ seg.name }}" required>
+              <input type="number" name="segment_credit_percentage_customer" step="0.01" min="0" value="{{ seg.credit_percentage_customer if seg.credit_percentage_customer is not none else '' }}" placeholder="Credit % Customer">
+              <input type="number" name="segment_credit_percentage_ambifo" step="0.01" min="0" value="{{ seg.credit_percentage_ambifo if seg.credit_percentage_ambifo is not none else '' }}" placeholder="Credit % Ambifo">
+              <label class="checkbox-row" style="margin:0;white-space:nowrap;">
+                <input type="checkbox" name="segment_credit_basis_mrr" value="1" {% if seg.credit_basis_mrr %}checked{% endif %}>
+                MRR
+              </label>
+              <label class="checkbox-row" style="margin:0;white-space:nowrap;">
+                <input type="checkbox" name="segment_credit_basis_arr" value="1" {% if seg.credit_basis_arr %}checked{% endif %}>
+                ARR
+              </label>
               <button class="btn" type="submit" name="action" value="update_segment">Update</button>
               <button class="btn btn-danger" type="submit" name="action" value="delete_segment" onclick="return confirm('Delete this segment?');">Delete</button>
             </form>

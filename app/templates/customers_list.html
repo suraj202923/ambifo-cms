@@ -217,6 +217,10 @@
       <p id="emailModalRecipient" class="email-modal-recipient"></p>
       <label for="emailCcList">CC (optional, comma separated)</label>
       <input id="emailCcList" class="status-select" type="text" placeholder="manager@company.com, lead@company.com">
+      <label class="checkbox-row" style="margin:0.45rem 0 0.25rem;">
+        <input id="emailIncludeAlternateCc" type="checkbox" value="1">
+        Include opportunity alternate emails in CC
+      </label>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:0.6rem;">
         <button type="button" id="emailModeTemplateBtn" class="btn btn-secondary" onclick="switchEmailMode('template')">Select Template</button>
         <button type="button" id="emailModeCustomBtn" class="btn btn-secondary" onclick="switchEmailMode('custom')">Write Email</button>
@@ -319,6 +323,7 @@
     document.getElementById('emailModalRecipient').textContent = 'To: ' + customerName;
     document.getElementById('emailTemplateSelect').value = '';
     document.getElementById('emailCcList').value = '';
+    document.getElementById('emailIncludeAlternateCc').checked = false;
     document.getElementById('emailCustomSubject').value = '';
     document.getElementById('emailCustomBody').value = '';
     document.getElementById('emailCustomPreviewWrap').style.display = 'none';
@@ -392,6 +397,7 @@
   function submitEmailModal() {
     var templateId = document.getElementById('emailTemplateSelect').value;
     var ccList = (document.getElementById('emailCcList').value || '').trim();
+    var includeAlternateCc = document.getElementById('emailIncludeAlternateCc').checked;
     var customSubject = (document.getElementById('emailCustomSubject').value || '').trim();
     var customBody = (document.getElementById('emailCustomBody').value || '').trim();
 
@@ -413,6 +419,9 @@
     var formData = new FormData();
     formData.append('email_source', _emailMode);
     formData.append('cc_emails', ccList);
+    if (includeAlternateCc) {
+      formData.append('include_alternate_cc', '1');
+    }
     if (_emailMode === 'template') {
       formData.append('template_id', templateId);
     } else {
