@@ -89,6 +89,14 @@ def _ensure_runtime_schema_updates():
                 continue
             db.session.execute(text(ddl))
 
+    if "users" in existing_tables:
+        user_columns = {col["name"] for col in inspector.get_columns("users")}
+        if "email" not in user_columns:
+            db.session.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
+            db.session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email ON users (email) WHERE email IS NOT NULL"))
+        if "is_active_user" not in user_columns:
+            db.session.execute(text("ALTER TABLE users ADD COLUMN is_active_user BOOLEAN NOT NULL DEFAULT TRUE"))
+
     if "customers" in existing_tables:
         customer_columns = {col["name"] for col in inspector.get_columns("customers")}
         if "cloud" not in customer_columns:
