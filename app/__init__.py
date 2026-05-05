@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from flask import Flask, render_template, send_from_directory
+from flask import Flask, jsonify, render_template, send_from_directory
 from flask.cli import with_appcontext
-from flask_login import LoginManager
+from flask_login import LoginManager, current_user
 from sqlalchemy.engine import make_url
 from sqlalchemy import create_engine, inspect, text
 from werkzeug.utils import secure_filename
@@ -511,9 +511,44 @@ def create_app():
         response.headers["Cache-Control"] = "no-cache"
         return response
 
+    def _csp_report_only_value():
+        return "; ".join([
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com",
+            "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: https:",
+            "font-src 'self' data:",
+            "connect-src 'self' https://cloudflareinsights.com https://*.cloudflareinsights.com",
+            "worker-src 'self' blob:",
+            "frame-ancestors 'self'",
+            "base-uri 'self'",
+            "form-action 'self'",
+        ])
+
+    @app.get("/diagnostics/security-headers")
+    def diagnostics_security_headers():
+        if not current_user.is_authenticated:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        return jsonify({
+            "headers": {
+                "Content-Security-Policy": None,
+                "Content-Security-Policy-Report-Only": _csp_report_only_value(),
+                "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex",
+                "X-Frame-Options": None,
+                "X-Content-Type-Options": None,
+                "Referrer-Policy": None,
+                "Permissions-Policy": None,
+            }
+        })
+
     @app.after_request
     def add_noindex_headers(response):
         response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet, noimageindex"
+        # Keep this in report-only mode to avoid breaking existing inline scripts while
+        # still documenting intended allowed sources in production.
+        response.headers["Content-Security-Policy-Report-Only"] = _csp_report_only_value()
         return response
 
     @app.errorhandler(500)
