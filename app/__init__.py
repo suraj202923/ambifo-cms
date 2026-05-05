@@ -564,7 +564,14 @@ def create_app():
     @app.errorhandler(500)
     def internal_error(exc):
         """Catch unhandled 500s and show error page."""
-        return render_template("error_500.html"), 500
+        import traceback as _tb
+        error_detail = _tb.format_exc()
+        app.logger.error("Unhandled 500:\n%s", error_detail)
+        try:
+            show_detail = current_user.is_authenticated
+        except Exception:
+            show_detail = False
+        return render_template("error_500.html", error_detail=error_detail if show_detail else None), 500
 
     @app.cli.command("init-db")
     @with_appcontext
