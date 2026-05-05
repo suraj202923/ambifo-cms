@@ -1,4 +1,4 @@
-const CACHE_NAME = "ambifo-crm-v2";
+const CACHE_NAME = "ambifo-crm-v3";
 const APP_SHELL = [
   "/",
   "/login",
