@@ -526,29 +526,31 @@ def create_app():
             "form-action 'self'",
         ])
 
+    def _security_headers_value_map():
+        return {
+            "Content-Security-Policy": None,
+            "Content-Security-Policy-Report-Only": _csp_report_only_value(),
+            "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex",
+            "X-Frame-Options": "SAMEORIGIN",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+        }
+
     @app.get("/diagnostics/security-headers")
     def diagnostics_security_headers():
         if not current_user.is_authenticated:
             return jsonify({"error": "Unauthorized"}), 401
 
-        return jsonify({
-            "headers": {
-                "Content-Security-Policy": None,
-                "Content-Security-Policy-Report-Only": _csp_report_only_value(),
-                "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex",
-                "X-Frame-Options": None,
-                "X-Content-Type-Options": None,
-                "Referrer-Policy": None,
-                "Permissions-Policy": None,
-            }
-        })
+        return jsonify({"headers": _security_headers_value_map()})
 
     @app.after_request
     def add_noindex_headers(response):
-        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet, noimageindex"
-        # Keep this in report-only mode to avoid breaking existing inline scripts while
+        # Keep CSP in report-only mode to avoid breaking existing inline scripts while
         # still documenting intended allowed sources in production.
-        response.headers["Content-Security-Policy-Report-Only"] = _csp_report_only_value()
+        for header_name, header_value in _security_headers_value_map().items():
+            if header_value is not None:
+                response.headers[header_name] = header_value
         return response
 
     @app.errorhandler(500)
