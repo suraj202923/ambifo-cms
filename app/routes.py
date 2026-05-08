@@ -1825,14 +1825,117 @@ def _lead_macro_values(lead):
     }
 
 
-@crm_bp.route("/configuration/sow-template-sections/<int:template_id>")
+@crm_bp.route("/configuration/sow-template-sections/<int:template_id>", methods=["GET", "POST"])
 def configuration_sow_template_sections(template_id):
-    # Backward-compatible alias used by older templates; section management now lives on /configuration.
+    master_template = SOWMasterTemplate.query.get_or_404(template_id)
+    sections = _ensure_template_sections(master_template)
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+
+        if action == "save_template_title_label":
+            label = (request.form.get("document_title_label") or "").strip()
+            _set_sow_document_title_label(master_template.id, label)
+            db.session.commit()
+            flash("Template title label updated.", "success")
+            return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id))
+
+        if action == "add_section":
+            new_name = (request.form.get("new_section_name") or "").strip()
+            raw_target_seq = request.form.get("new_section_sequence")
+            if not new_name:
+                flash("Section name is required.", "error")
+                return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id))
+
+            appended_seq = len(sections) + 1
+            section = SOWMasterTemplateSection(
+                template_id=master_template.id,
+                section_name=new_name,
+                sequence_no=appended_seq,
+                content_html="<p></p>",
+            )
+            db.session.add(section)
+            db.session.flush()
+
+            try:
+                target_seq = int(raw_target_seq) if (raw_target_seq or "").strip() else None
+            except (TypeError, ValueError):
+                target_seq = None
+            if target_seq is not None:
+                _move_template_section_to_position(master_template.id, section.id, target_seq)
+
+            db.session.commit()
+            flash("Section added.", "success")
+            return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id, section_id=section.id))
+
+        section_id = request.form.get("section_id", type=int)
+        section = (
+            SOWMasterTemplateSection.query
+            .filter_by(id=section_id, template_id=master_template.id)
+            .first()
+            if section_id else None
+        )
+        if not section:
+            flash("Section not found.", "error")
+            return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id))
+
+        if action == "update_section_meta":
+            new_name = (request.form.get("section_name") or "").strip()
+            if not new_name:
+                flash("Section name is required.", "error")
+                return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id, section_id=section.id))
+
+            section.section_name = new_name
+            raw_seq = request.form.get("sequence_no")
+            try:
+                target_seq = int(raw_seq) if (raw_seq or "").strip() else section.sequence_no
+            except (TypeError, ValueError):
+                target_seq = section.sequence_no
+            _move_template_section_to_position(master_template.id, section.id, target_seq)
+            db.session.commit()
+            flash("Section metadata updated.", "success")
+            return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id, section_id=section.id))
+
+        if action == "delete_section":
+            if len(sections) <= 1:
+                flash("At least one section must remain.", "error")
+                return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id, section_id=section.id))
+
+            db.session.delete(section)
+            db.session.flush()
+
+            remaining = _get_template_sections(master_template)
+            for idx, sec in enumerate(remaining, start=1):
+                sec.sequence_no = idx
+
+            db.session.commit()
+            flash("Section deleted.", "success")
+            fallback_section = remaining[0] if remaining else None
+            if fallback_section:
+                return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id, section_id=fallback_section.id))
+            return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id))
+
+        if action == "save_section_content":
+            section.content_html = request.form.get("section_content") or ""
+            db.session.commit()
+            flash("Section content saved.", "success")
+            return redirect(url_for("crm.configuration_sow_template_sections", template_id=master_template.id, section_id=section.id))
+
     section_id = request.args.get("section_id", type=int)
-    target = url_for("crm.configuration", sow_template_id=template_id)
+    sections = _ensure_template_sections(master_template)
+    selected_section = None
     if section_id:
-        target = f"{target}&section_id={section_id}"
-    return redirect(f"{target}#sow-master-config")
+        selected_section = next((s for s in sections if s.id == section_id), None)
+    if not selected_section and sections:
+        selected_section = sections[0]
+
+    return render_template(
+        "sow_template_sections.html",
+        master_template=master_template,
+        sections=sections,
+        selected_section=selected_section,
+        document_title_label=_get_sow_document_title_label(master_template.id),
+    )
 
 
 @crm_bp.route("/configuration", methods=["GET", "POST"])
