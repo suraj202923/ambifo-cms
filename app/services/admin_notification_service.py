@@ -9,6 +9,7 @@ from app.services.email_service import EmailService
 
 CORE_HISTORY_TAGS = {
     "assign",
+    "docusign",
     "email",
     "gathering",
     "important",

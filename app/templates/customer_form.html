@@ -167,11 +167,12 @@
         <button type="button" class="history-filter-btn" onclick="setHistoryFilter('segment-updated',this)">Segment</button>
         <button type="button" class="history-filter-btn" onclick="setHistoryFilter('gathering-data-added',this)">Gathering</button>
         <button type="button" class="history-filter-btn" onclick="setHistoryFilter('document-uploaded',this)">Documents</button>
+        <button type="button" class="history-filter-btn" onclick="setHistoryFilter('docusign',this)">DocuSign</button>
       </div>
       <div id="historyFilterSummary" class="hint" style="margin:0.35rem 0 0.5rem;">Showing all entries</div>
       <div class="status-list" style="max-height:65vh;overflow-y:auto;">
         {% for h in history_entries %}
-          {% set effective_tag = (h.tag_name or ('email' if h.action.startswith('email') else ('gathering' if 'gathering' in h.action else ('status' if 'status' in h.action else ('segment' if 'segment' in h.action else ('assign' if 'assign' in h.action else 'update'))))) ) %}
+          {% set effective_tag = (h.tag_name or ('docusign' if 'docusign' in h.action else ('email' if h.action.startswith('email') else ('gathering' if 'gathering' in h.action else ('status' if 'status' in h.action else ('segment' if 'segment' in h.action else ('assign' if 'assign' in h.action else 'update')))))) ) %}
           {% set tag_color = history_tag_colors.get(effective_tag, '#6b7280') if history_tag_colors else '#6b7280' %}
           <div class="history-item" data-action="{{ h.action }}" style="margin-bottom:0.55rem;">
             <div class="history-meta">
@@ -752,6 +753,17 @@
               &nbsp;|&nbsp;<span class="badge-type">{{ doc.storage_backend | upper }}</span>
               {% if doc.description %}&nbsp;|&nbsp;{{ doc.description }}{% endif %}
               {% if doc.uploaded_by %}&nbsp;|&nbsp;by {{ doc.uploaded_by }}{% endif %}
+              {% if doc.docusign_envelope_id %}
+              &nbsp;|&nbsp;
+              <span class="badge-type" style="background:
+                {% if (doc.docusign_status or '')|lower == 'completed' %}#dcfce7;color:#14532d;
+                {% elif (doc.docusign_status or '')|lower in ['sent','delivered'] %}#dbeafe;color:#1e3a8a;
+                {% elif (doc.docusign_status or '')|lower in ['declined','voided'] %}#fee2e2;color:#7f1d1d;
+                {% else %}#e2e8f0;color:#334155;{% endif %}
+                border:1px solid rgba(15,23,42,.12);">
+                DocuSign: {{ (doc.docusign_status or 'sent')|lower }}
+              </span>
+              {% endif %}
             </div>
           </div>
           <div class="doc-actions">
@@ -760,6 +772,15 @@
             <a class="mini-btn" href="{{ url_for('crm.opportunity_document_editor', customer_id=customer.id, doc_id=doc.id) }}">✏ Edit</a>
             <a class="mini-btn" href="{{ url_for('crm.opportunity_document_download_docx', customer_id=customer.id, doc_id=doc.id) }}">📄 DOC</a>
             <a class="mini-btn" href="{{ url_for('crm.opportunity_document_download_pdf', customer_id=customer.id, doc_id=doc.id) }}">🧾 PDF</a>
+            {% if doc.docusign_envelope_id %}
+            <form method="post" action="{{ url_for('crm.refresh_document_docusign_status', customer_id=customer.id, doc_id=doc.id) }}" style="margin:0;">
+              <input type="hidden" name="return_tab" value="documents">
+              <button class="mini-btn" type="submit">🔄 Refresh Status</button>
+            </form>
+            {% if (doc.docusign_status or '')|lower == 'completed' and doc.signed_pdf_path %}
+            <a class="mini-btn" href="{{ url_for('crm.download_signed_docusign_pdf', customer_id=customer.id, doc_id=doc.id) }}">✅ Signed PDF</a>
+            {% endif %}
+            {% endif %}
             {% endif %}
             <form method="post" action="{{ url_for('crm.opportunity_document_delete', customer_id=customer.id, doc_id=doc.id) }}" onsubmit="return confirm('Delete this document?');" style="margin:0;">
               <button class="mini-btn danger" type="submit">🗑️ Delete</button>
@@ -772,7 +793,81 @@
     </div>
   </div>
 
-  <!-- ══ TAB 6: Create Diagram ════════════════════════ -->
+  <!-- ══ TAB 6: Sign Requests (DocuSign) ═══════════════ -->
+  <div id="tab-sign-requests" class="tab-pane">
+    <div class="ce-block" style="margin-top:0.5rem;">
+      <p class="ce-label">✍ Sign Requests</p>
+      <p class="hint" style="margin-top:0.35rem;">Shows documents sent to DocuSign with envelope details, status, and quick actions.</p>
+    </div>
+
+    <div class="ce-block" style="margin-top:0.65rem;">
+      <p class="ce-label">⬆ Upload &amp; Send For Signature</p>
+      <form method="post" action="{{ url_for('crm.opportunity_sign_request_upload_and_send', customer_id=customer.id) }}"
+            enctype="multipart/form-data" class="grid-form" style="margin-top:0;">
+        <label class="full">File *
+          <input type="file" name="document_file" required accept=".pdf,.html,.htm,application/pdf,text/html">
+        </label>
+        <label class="full">Description <span class="hint-inline">(optional)</span>
+          <input name="doc_description" placeholder="e.g. MSA agreement for signature">
+        </label>
+        <label>Signer Name *
+          <input name="signer_name" value="{{ customer.customer_name or '' }}" required>
+        </label>
+        <label>Signer Email *
+          <input type="email" name="signer_email" value="{{ customer.email or '' }}" required>
+        </label>
+        <label class="full">Email Subject <span class="hint-inline">(optional)</span>
+          <input name="email_subject" placeholder="Please review and sign this document">
+        </label>
+        <label class="full">Email Message <span class="hint-inline">(optional)</span>
+          <textarea name="email_body" rows="3" placeholder="Please review and sign at your earliest convenience."></textarea>
+        </label>
+        <button class="btn btn-sm" type="submit">Send Sign Request</button>
+      </form>
+      <p class="hint" style="margin-top:0.45rem;">Supported here: PDF and HTML uploads. Other files can be uploaded in Documents tab and converted separately.</p>
+    </div>
+
+    <div class="doc-list">
+      {% set sign_docs = documents | selectattr('docusign_envelope_id') | list %}
+      {% for doc in sign_docs %}
+        <div class="doc-item" style="display:block;">
+          <div class="doc-meta" style="margin-bottom:8px;">
+            <div class="doc-name">📄 {{ doc.original_filename }}</div>
+            <div class="doc-info">
+              {{ doc.created_at.strftime('%Y-%m-%d %H:%M') }}
+              &nbsp;|&nbsp;<span class="badge-type">{{ doc.storage_backend | upper }}</span>
+              {% if doc.uploaded_by %}&nbsp;|&nbsp;by {{ doc.uploaded_by }}{% endif %}
+            </div>
+          </div>
+
+          <div class="doc-info" style="display:flex;flex-wrap:wrap;gap:8px 14px;line-height:1.6;">
+            <span><strong>Envelope ID:</strong> {{ doc.docusign_envelope_id or '—' }}</span>
+            <span><strong>Status:</strong> {{ (doc.docusign_status or 'sent') | lower }}</span>
+            <span><strong>Signer:</strong> {{ doc.docusign_signer_name or '—' }}</span>
+            <span><strong>Signer Email:</strong> {{ doc.docusign_signer_email or '—' }}</span>
+            <span><strong>Sent At:</strong> {{ doc.docusign_sent_at.strftime('%Y-%m-%d %H:%M') if doc.docusign_sent_at else '—' }}</span>
+            <span><strong>Completed At:</strong> {{ doc.docusign_completed_at.strftime('%Y-%m-%d %H:%M') if doc.docusign_completed_at else '—' }}</span>
+          </div>
+
+          <div class="doc-actions" style="margin-top:10px;">
+            <a class="mini-btn" href="{{ url_for('crm.opportunity_document_preview', customer_id=customer.id, doc_id=doc.id) }}" target="_blank" rel="noopener">👁 Preview</a>
+            <form method="post" action="{{ url_for('crm.refresh_document_docusign_status', customer_id=customer.id, doc_id=doc.id) }}" style="margin:0;">
+              <input type="hidden" name="return_tab" value="sign-requests">
+              <button class="mini-btn" type="submit">🔄 Refresh Status</button>
+            </form>
+            <a class="mini-btn" href="{{ url_for('crm.opportunity_document_editor', customer_id=customer.id, doc_id=doc.id) }}">✏ Open In Editor</a>
+            {% if (doc.docusign_status or '')|lower == 'completed' and doc.signed_pdf_path %}
+            <a class="mini-btn" href="{{ url_for('crm.download_signed_docusign_pdf', customer_id=customer.id, doc_id=doc.id) }}">✅ Signed PDF</a>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}
+        <p class="hint" style="margin-top:0.5rem;">No DocuSign sign requests found yet. Send a document from Document Editor to populate this list.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ══ TAB 7: Create Diagram ════════════════════════ -->
   <div id="tab-diagrams" class="tab-pane">
     <div class="ce-block" style="margin-top:0.5rem;">
       <p class="ce-label">➕ Add Diagram Macro</p>
@@ -946,6 +1041,7 @@
       <button class="sidebar-tab" data-tab="gathering" onclick="switchTab('gathering',this)">📋 Gathering Data</button>
       <button class="sidebar-tab" data-tab="meeting" onclick="switchTab('meeting',this)">📅 Meeting Links</button>
       <button class="sidebar-tab" data-tab="documents" onclick="switchTab('documents',this)">📁 Documents</button>
+      <button class="sidebar-tab" data-tab="sign-requests" onclick="switchTab('sign-requests',this)">✍ Sign Requests</button>
       <button class="sidebar-tab" data-tab="diagrams" onclick="switchTab('diagrams',this)">📐 Create Diagram</button>
       {% if is_edit %}
       <a class="sidebar-tab" href="{{ url_for('crm.opportunity_document_editor', customer_id=customer.id) }}" style="display:block;text-align:left;text-decoration:none;color:inherit;">📄 Create Document</a>
@@ -1090,7 +1186,10 @@ function setHistoryFilter(action, btn) {
   var items = document.querySelectorAll('.history-item');
   var shown = 0;
   items.forEach(function(item) {
-    var m = action === 'all' || item.dataset.action === action;
+    var itemAction = String(item.dataset.action || '').toLowerCase();
+    var m = action === 'all'
+      || itemAction === action
+      || (action === 'docusign' && itemAction.indexOf('docusign') === 0);
     item.style.display = m ? 'block' : 'none';
     if (m) shown++;
   });

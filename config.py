@@ -112,5 +112,12 @@ class Config:
     TEAMS_ORGANIZER_ID = str(_get_setting("TEAMS_ORGANIZER_ID", "Teams.OrganizerId", ""))
     TEAMS_DEFAULT_DURATION_MINUTES = int(_get_setting("TEAMS_DEFAULT_DURATION_MINUTES", "Teams.DefaultDurationMinutes", 60))
 
+    DOCUSIGN_INTEGRATION_KEY = str(_get_setting("DOCUSIGN_INTEGRATION_KEY", "DocuSign.IntegrationKey", ""))
+    DOCUSIGN_ACCOUNT_ID = str(_get_setting("DOCUSIGN_ACCOUNT_ID", "DocuSign.AccountId", ""))
+    DOCUSIGN_USER_ID = str(_get_setting("DOCUSIGN_USER_ID", "DocuSign.UserId", ""))
+    DOCUSIGN_BASE_URL = str(_get_setting("DOCUSIGN_BASE_URL", "DocuSign.BaseUrl", "https://account-d.docusign.com"))
+    DOCUSIGN_PRIVATE_KEY = str(_get_setting("DOCUSIGN_PRIVATE_KEY", "DocuSign.PrivateKey", ""))
+    DOCUSIGN_WEBHOOK_HMAC = str(_get_setting("DOCUSIGN_WEBHOOK_HMAC", "DocuSign.WebhookHmac", ""))
+
     DEFAULT_ADMIN_USERNAME = str(_get_setting("DEFAULT_ADMIN_USERNAME", "Auth.DefaultAdminUsername", "admin"))
     DEFAULT_ADMIN_PASSWORD = str(_get_setting("DEFAULT_ADMIN_PASSWORD", "Auth.DefaultAdminPassword", "admin123"))

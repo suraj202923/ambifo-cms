@@ -148,6 +148,37 @@ def _ensure_runtime_schema_updates():
             db.session.execute(text("ALTER TABLE customer_sows ADD COLUMN master_template_id INTEGER"))
         if "selected_diagram_ids" not in sow_columns:
             db.session.execute(text("ALTER TABLE customer_sows ADD COLUMN selected_diagram_ids TEXT"))
+        sow_docusign_desired = {
+            "docusign_envelope_id": "ALTER TABLE customer_sows ADD COLUMN docusign_envelope_id VARCHAR(100)",
+            "docusign_status": "ALTER TABLE customer_sows ADD COLUMN docusign_status VARCHAR(40)",
+            "docusign_sent_at": "ALTER TABLE customer_sows ADD COLUMN docusign_sent_at TIMESTAMP",
+            "docusign_completed_at": "ALTER TABLE customer_sows ADD COLUMN docusign_completed_at TIMESTAMP",
+            "docusign_signer_email": "ALTER TABLE customer_sows ADD COLUMN docusign_signer_email VARCHAR(255)",
+            "docusign_signer_name": "ALTER TABLE customer_sows ADD COLUMN docusign_signer_name VARCHAR(255)",
+            "signed_pdf_path": "ALTER TABLE customer_sows ADD COLUMN signed_pdf_path VARCHAR(500)",
+        }
+        for column_name, ddl in sow_docusign_desired.items():
+            if column_name in sow_columns:
+                continue
+            db.session.execute(text(ddl))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_customer_sows_docusign_envelope_id ON customer_sows (docusign_envelope_id)"))
+
+    if "customer_documents" in existing_tables:
+        doc_columns = {col["name"] for col in inspector.get_columns("customer_documents")}
+        doc_docusign_desired = {
+            "docusign_envelope_id": "ALTER TABLE customer_documents ADD COLUMN docusign_envelope_id VARCHAR(100)",
+            "docusign_status": "ALTER TABLE customer_documents ADD COLUMN docusign_status VARCHAR(40)",
+            "docusign_sent_at": "ALTER TABLE customer_documents ADD COLUMN docusign_sent_at TIMESTAMP",
+            "docusign_completed_at": "ALTER TABLE customer_documents ADD COLUMN docusign_completed_at TIMESTAMP",
+            "docusign_signer_email": "ALTER TABLE customer_documents ADD COLUMN docusign_signer_email VARCHAR(255)",
+            "docusign_signer_name": "ALTER TABLE customer_documents ADD COLUMN docusign_signer_name VARCHAR(255)",
+            "signed_pdf_path": "ALTER TABLE customer_documents ADD COLUMN signed_pdf_path VARCHAR(500)",
+        }
+        for column_name, ddl in doc_docusign_desired.items():
+            if column_name in doc_columns:
+                continue
+            db.session.execute(text(ddl))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_customer_documents_docusign_envelope_id ON customer_documents (docusign_envelope_id)"))
 
     if "sow_master_templates" in existing_tables:
         master_columns = {col["name"] for col in inspector.get_columns("sow_master_templates")}
@@ -323,6 +354,7 @@ def _ensure_runtime_schema_updates():
 
     default_tags = [
         ("important", "#c0392b"),
+        ("docusign", "#1d4ed8"),
         ("email", "#1d4ed8"),
         ("meeting", "#2563eb"),
         ("gathering", "#0f766e"),

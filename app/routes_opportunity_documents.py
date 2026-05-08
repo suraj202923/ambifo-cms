@@ -1,12 +1,14 @@
 import base64
 from datetime import datetime
+import hashlib
+import hmac
 import json
 import io
 import re
 from pathlib import Path
 import urllib.request
 
-from flask import current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Response, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
 from flask_login import login_required
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
@@ -90,7 +92,66 @@ def _editor_document_payload_from_record(doc):
         "expiry_days": meta.get("expiry_days") or 7,
         "content_html": content_html,
         "full_html": full_html,
+        "docusign_status": doc.docusign_status,
+        "docusign_envelope_id": doc.docusign_envelope_id,
+        "docusign_completed_at": (doc.docusign_completed_at.isoformat() if doc.docusign_completed_at else None),
+        "signed_pdf_path": doc.signed_pdf_path,
     }
+
+
+def _extract_docusign_webhook_event(raw_body, content_type):
+    """Parse DocuSign Connect webhook payload (JSON or XML-ish) and extract event.
+
+    Returns tuple: (envelope_id, status, completed_at_iso_or_empty)
+    """
+    body_text = (raw_body or b"").decode("utf-8", errors="ignore")
+    lower_ct = (content_type or "").lower()
+
+    envelope_id = ""
+    status = ""
+    completed_at = ""
+
+    if "json" in lower_ct or body_text.lstrip().startswith("{"):
+        try:
+            payload = json.loads(body_text)
+        except Exception:
+            payload = {}
+
+        envelope_id = str(
+            payload.get("envelopeId")
+            or payload.get("envelope_id")
+            or (payload.get("data") or {}).get("envelopeId")
+            or (payload.get("data") or {}).get("envelope_id")
+            or ""
+        ).strip()
+        status = str(
+            payload.get("status")
+            or payload.get("envelopeStatus")
+            or (payload.get("data") or {}).get("status")
+            or (payload.get("data") or {}).get("envelopeStatus")
+            or ""
+        ).strip().lower()
+        completed_at = str(
+            payload.get("completedDateTime")
+            or payload.get("completed_at")
+            or (payload.get("data") or {}).get("completedDateTime")
+            or ""
+        ).strip()
+        return envelope_id, status, completed_at
+
+    envelope_match = re.search(r"<envelopeId>([^<]+)</envelopeId>", body_text, flags=re.IGNORECASE)
+    if envelope_match:
+        envelope_id = envelope_match.group(1).strip()
+
+    status_match = re.search(r"<status>([^<]+)</status>", body_text, flags=re.IGNORECASE)
+    if status_match:
+        status = status_match.group(1).strip().lower()
+
+    completed_match = re.search(r"<completedDateTime>([^<]+)</completedDateTime>", body_text, flags=re.IGNORECASE)
+    if completed_match:
+        completed_at = completed_match.group(1).strip()
+
+    return envelope_id, status, completed_at
 
 
 def register_opportunity_document_routes(
@@ -204,6 +265,128 @@ def register_opportunity_document_routes(
         flash(f"Document '{upload.filename}' uploaded.", "success")
         return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="documents"))
 
+    @bp.route("/opportunities/<int:customer_id>/sign-requests/upload-and-send", methods=["POST"])
+    @login_required
+    def opportunity_sign_request_upload_and_send(customer_id):
+        customer = Customer.query.get_or_404(customer_id)
+
+        upload = request.files.get("document_file")
+        if not upload or not upload.filename:
+            flash("Please choose a file to upload for sign request.", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+
+        signer_name = (request.form.get("signer_name") or customer.customer_name or "").strip()
+        signer_email = (request.form.get("signer_email") or customer.email or "").strip()
+        if not signer_name or not signer_email or "@" not in signer_email:
+            flash("Valid signer name and signer email are required.", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+
+        email_subject = (request.form.get("email_subject") or "").strip()
+        email_body = (request.form.get("email_body") or "").strip()
+        description = (request.form.get("doc_description") or "").strip()
+
+        raw_bytes = upload.read()
+        if not raw_bytes:
+            flash("Uploaded file is empty.", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+
+        import mimetypes  # noqa: PLC0415
+
+        detected_mime = upload.mimetype or mimetypes.guess_type(upload.filename)[0] or "application/octet-stream"
+        ext = Path(upload.filename).suffix.lower()
+
+        # Step 1: Save uploaded source document as a normal opportunity document.
+        svc = StorageService(current_app._get_current_object())
+        upload_file = FileStorage(
+            stream=io.BytesIO(raw_bytes),
+            filename=upload.filename,
+            content_type=detected_mime,
+        )
+        save_result = svc.save_document(upload_file, upload.filename, customer.id)
+        if not save_result.success:
+            flash(f"Upload failed: {save_result.error}", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+
+        doc = CustomerDocument(
+            customer_id=customer.id,
+            original_filename=upload.filename,
+            stored_filename=save_result.stored_filename,
+            file_path=save_result.file_path,
+            blob_url=save_result.blob_url,
+            storage_backend=save_result.storage_backend,
+            file_size_bytes=len(raw_bytes),
+            mime_type=detected_mime,
+            description=(description or "[Sign Request] Uploaded for DocuSign"),
+            uploaded_by=actor_name(),
+        )
+        db.session.add(doc)
+        db.session.flush()
+
+        log_history(
+            customer.id,
+            action="docusign-sign-request-uploaded",
+            changes_summary=(
+                f"Document '{doc.original_filename}' uploaded for DocuSign sign request. "
+                f"Signer: {signer_name} <{signer_email}>."
+            ),
+            tag_name="docusign",
+        )
+
+        # Step 2: Build PDF bytes for DocuSign (supports PDF and HTML upload).
+        file_title = (Path(upload.filename).stem or "document").strip()
+        if detected_mime == "application/pdf" or ext == ".pdf":
+            pdf_bytes = raw_bytes
+        elif detected_mime.startswith("text/html") or ext in {".html", ".htm"}:
+            html_text = raw_bytes.decode("utf-8", errors="ignore")
+            try:
+                pdf_bytes = generate_html_like_pdf(file_title, html_text)
+            except Exception as exc:
+                db.session.commit()
+                flash(f"Document uploaded, but PDF conversion failed for signing: {exc}", "error")
+                return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+        else:
+            db.session.commit()
+            flash("Document uploaded, but only PDF or HTML files can be sent for DocuSign from this form.", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+
+        # Step 3: Send envelope to DocuSign.
+        from app.services.docusign_service import DocuSignService
+
+        ds = DocuSignService(current_app._get_current_object())
+        send_result = ds.send_envelope(
+            pdf_bytes=pdf_bytes,
+            document_name=(file_title + ".pdf"),
+            signer_name=signer_name,
+            signer_email=signer_email,
+            email_subject=(email_subject or None),
+            email_body=(email_body or None),
+        )
+
+        if not send_result.success:
+            db.session.commit()
+            flash(f"Document uploaded, but DocuSign send failed: {send_result.error}", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+
+        doc.docusign_envelope_id = (send_result.envelope_id or "").strip() or None
+        doc.docusign_status = "sent"
+        doc.docusign_sent_at = datetime.utcnow()
+        doc.docusign_signer_name = signer_name
+        doc.docusign_signer_email = signer_email
+
+        log_history(
+            customer.id,
+            action="docusign-sent",
+            changes_summary=(
+                f"Sign request sent via DocuSign for '{doc.original_filename}' to "
+                f"{signer_name} <{signer_email}>. Envelope ID: {send_result.envelope_id}."
+            ),
+            tag_name="docusign",
+        )
+        db.session.commit()
+
+        flash(f"Sign request sent successfully. Envelope ID: {send_result.envelope_id}", "success")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+
     @bp.route("/opportunities/<int:customer_id>/documents/<int:doc_id>/download")
     @login_required
     def opportunity_document_download(customer_id, doc_id):
@@ -226,6 +409,40 @@ def register_opportunity_document_routes(
 
         flash("File not found on disk.", "error")
         return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="documents"))
+
+    @bp.route("/opportunities/<int:customer_id>/documents/<int:doc_id>/preview")
+    @login_required
+    def opportunity_document_preview(customer_id, doc_id):
+        customer = Customer.query.get_or_404(customer_id)
+        doc = CustomerDocument.query.get_or_404(doc_id)
+        if doc.customer_id != customer.id:
+            flash("Document not found.", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="sign-requests"))
+
+        # For editor HTML documents, return rendered full HTML inline.
+        try:
+            if (doc.description or "").startswith("[Document Editor]"):
+                payload = _editor_document_payload_from_record(doc)
+                html_body = (payload.get("full_html") or payload.get("content_html") or "").strip()
+                if html_body:
+                    return Response(html_body, mimetype="text/html")
+        except Exception:
+            pass
+
+        # For non-editor HTML documents stored locally, preview as text/html.
+        if (doc.mime_type or "").startswith("text/html") and doc.file_path and Path(doc.file_path).exists():
+            try:
+                html_body = Path(doc.file_path).read_text(encoding="utf-8")
+            except Exception:
+                html_body = Path(doc.file_path).read_text(encoding="utf-8", errors="ignore")
+            return Response(html_body, mimetype="text/html")
+
+        # Cloud-hosted assets can be previewed directly via blob URL.
+        if doc.blob_url and doc.storage_backend in {"azure", "aws", "gcp"}:
+            return redirect(doc.blob_url)
+
+        # Fallback to normal file download route.
+        return redirect(url_for("crm.opportunity_document_download", customer_id=customer.id, doc_id=doc.id))
 
     @bp.route("/opportunities/<int:customer_id>/documents/<int:doc_id>/download-docx")
     @login_required
@@ -339,6 +556,92 @@ def register_opportunity_document_routes(
         db.session.commit()
         flash(f"Document '{fname}' deleted.", "success")
         return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="documents"))
+
+    @bp.route("/opportunities/<int:customer_id>/documents/<int:doc_id>/docusign/signed-download")
+    @login_required
+    def download_signed_docusign_pdf(customer_id, doc_id):
+        customer = Customer.query.get_or_404(customer_id)
+        doc = CustomerDocument.query.get_or_404(doc_id)
+        if doc.customer_id != customer.id:
+            flash("Document not found.", "error")
+            return redirect(url_for("crm.opportunity_document_editor", customer_id=customer.id))
+
+        signed_path = (doc.signed_pdf_path or "").strip()
+        if not signed_path:
+            flash("Signed PDF is not available yet.", "error")
+            return redirect(url_for("crm.opportunity_document_editor", customer_id=customer.id))
+
+        if signed_path.startswith("http://") or signed_path.startswith("https://"):
+            return redirect(signed_path)
+
+        fpath = Path(signed_path)
+        if not fpath.exists() or not fpath.is_file():
+            flash("Signed PDF file was not found in storage.", "error")
+            return redirect(url_for("crm.opportunity_document_editor", customer_id=customer.id))
+
+        download_name = (doc.original_filename or f"document_{doc.id}.html").replace(".html", "") + "_signed.pdf"
+        return send_file(fpath, as_attachment=True, download_name=download_name, mimetype="application/pdf")
+
+    @bp.route("/opportunities/<int:customer_id>/documents/<int:doc_id>/docusign/refresh", methods=["POST"])
+    @login_required
+    def refresh_document_docusign_status(customer_id, doc_id):
+        customer = Customer.query.get_or_404(customer_id)
+        doc = CustomerDocument.query.get_or_404(doc_id)
+        return_tab = (request.form.get("return_tab") or request.args.get("return_tab") or "documents").strip() or "documents"
+        if return_tab not in {"documents", "sign-requests"}:
+            return_tab = "documents"
+        if doc.customer_id != customer.id:
+            flash("Document not found.", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab=return_tab))
+
+        envelope_id = (doc.docusign_envelope_id or "").strip()
+        if not envelope_id:
+            flash("This document is not linked to a DocuSign envelope yet.", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab=return_tab))
+
+        from app.services.docusign_service import DocuSignService
+
+        ds = DocuSignService(current_app._get_current_object())
+        live_status = ds.get_envelope_status(envelope_id)
+        if str(live_status).startswith("error:"):
+            flash(f"DocuSign status fetch failed: {live_status}", "error")
+            return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab=return_tab))
+
+        normalized = str(live_status).strip().lower() or "unknown"
+        previous = (doc.docusign_status or "").strip().lower()
+        doc.docusign_status = normalized
+
+        if normalized == "completed" and not doc.docusign_completed_at:
+            doc.docusign_completed_at = datetime.utcnow()
+            try:
+                signed_pdf = ds.download_signed_document(envelope_id)
+                signed_name = (doc.original_filename or f"document_{doc.id}.html").replace(".html", "") + "_signed.pdf"
+                upload_file = FileStorage(
+                    stream=io.BytesIO(signed_pdf),
+                    filename=signed_name,
+                    content_type="application/pdf",
+                )
+                storage = StorageService(current_app._get_current_object())
+                saved = storage.save_document(upload_file, signed_name, customer.id)
+                if saved.success:
+                    doc.signed_pdf_path = (saved.blob_url or saved.file_path or "").strip() or None
+            except Exception:
+                pass
+
+        if previous != normalized:
+            log_history(
+                customer.id,
+                action="docusign-status-refresh",
+                changes_summary=(
+                    f"DocuSign status changed for '{doc.original_filename}': "
+                    f"{previous or 'none'} -> {normalized}."
+                ),
+                tag_name="docusign",
+            )
+
+        db.session.commit()
+        flash(f"DocuSign status updated: {normalized}.", "success")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab=return_tab))
 
     @bp.route("/opportunities/<int:customer_id>/document-editor", methods=["GET"])
     @login_required
@@ -480,3 +783,211 @@ def register_opportunity_document_routes(
             return jsonify(success=False, message=f"Unable to read document: {exc}"), 500
 
         return jsonify(success=True, document=payload)
+
+    @bp.route("/opportunities/<int:customer_id>/docusign/send", methods=["POST"])
+    @login_required
+    def opportunity_docusign_send(customer_id):
+        """Send a saved CustomerDocument to the customer for e-signature via DocuSign.
+
+        DocuSign emails the signer automatically — Ambifo does not send the email.
+        """
+        customer = Customer.query.get_or_404(customer_id)
+        data = request.get_json(silent=True) or {}
+
+        doc_id = data.get("doc_id")
+        try:
+            doc_id = int(doc_id)
+        except (TypeError, ValueError):
+            return jsonify(success=False, error="doc_id is required."), 400
+
+        doc = CustomerDocument.query.filter_by(id=doc_id, customer_id=customer.id).first()
+        if not doc:
+            return jsonify(success=False, error="Document not found."), 404
+
+        signer_name  = (data.get("signer_name") or customer.customer_name or "").strip()
+        signer_email = (data.get("signer_email") or customer.email or "").strip()
+        if not signer_name or not signer_email or "@" not in signer_email:
+            return jsonify(success=False, error="Valid signer name and email are required."), 400
+
+        # Generate PDF from the saved HTML document.
+        try:
+            raw_html = _read_customer_document_text(doc)
+            _meta, _content_html, full_html = _parse_editor_document_html(raw_html)
+            pdf_bytes = generate_html_like_pdf(full_html or _content_html)
+        except Exception as exc:
+            return jsonify(success=False, error=f"PDF generation failed: {exc}"), 500
+
+        # Send via DocuSign.
+        from app.services.docusign_service import DocuSignService
+        ds = DocuSignService(current_app._get_current_object())
+        doc_name = doc.original_filename.replace(".html", ".pdf")
+        result = ds.send_envelope(
+            pdf_bytes=pdf_bytes,
+            document_name=doc_name,
+            signer_name=signer_name,
+            signer_email=signer_email,
+            email_subject=data.get("email_subject") or None,
+            email_body=data.get("email_body") or None,
+        )
+
+        if not result.success:
+            return jsonify(success=False, error=result.error), 500
+
+        doc.docusign_envelope_id = (result.envelope_id or "").strip() or None
+        doc.docusign_status = "sent"
+        doc.docusign_sent_at = datetime.utcnow()
+        doc.docusign_completed_at = None
+        doc.docusign_signer_name = signer_name
+        doc.docusign_signer_email = signer_email
+
+        log_history(
+            customer.id,
+            action="docusign-sent",
+            changes_summary=(
+                f"Document '{doc_name}' sent for e-signature via DocuSign to {signer_name} <{signer_email}>. "
+                f"Envelope ID: {result.envelope_id}."
+            ),
+            tag_name="docusign",
+        )
+        db.session.commit()
+
+        return jsonify(success=True, envelope_id=result.envelope_id)
+
+    @bp.route("/opportunities/<int:customer_id>/docusign/status/<int:doc_id>", methods=["GET"])
+    @login_required
+    def opportunity_docusign_status(customer_id, doc_id):
+        """Return the current DocuSign envelope status for a document (JSON)."""
+        customer = Customer.query.get_or_404(customer_id)
+        doc = CustomerDocument.query.filter_by(id=doc_id, customer_id=customer.id).first()
+        if not doc:
+            return jsonify(success=False, error="Document not found."), 404
+
+        envelope_id = (doc.docusign_envelope_id or "").strip()
+        if not envelope_id:
+            return jsonify(success=False, error="No DocuSign envelope linked to this document."), 400
+
+        from app.services.docusign_service import DocuSignService
+        ds = DocuSignService(current_app._get_current_object())
+        live_status = ds.get_envelope_status(envelope_id)
+        if str(live_status).startswith("error:"):
+            return jsonify(success=False, error=live_status), 502
+
+        normalized = str(live_status).strip().lower() or "unknown"
+        previous = (doc.docusign_status or "").strip().lower()
+        doc.docusign_status = normalized
+
+        if normalized == "completed" and not doc.docusign_completed_at:
+            doc.docusign_completed_at = datetime.utcnow()
+            try:
+                signed_pdf = ds.download_signed_document(envelope_id)
+                signed_name = (doc.original_filename or f"document_{doc.id}.html").replace(".html", "") + "_signed.pdf"
+                upload_file = FileStorage(
+                    stream=io.BytesIO(signed_pdf),
+                    filename=signed_name,
+                    content_type="application/pdf",
+                )
+                storage = StorageService(current_app._get_current_object())
+                saved = storage.save_document(upload_file, signed_name, customer.id)
+                if saved.success:
+                    doc.signed_pdf_path = (saved.blob_url or saved.file_path or "").strip() or None
+            except Exception:
+                pass
+
+        if previous != normalized:
+            log_history(
+                customer.id,
+                action="docusign-status",
+                changes_summary=(
+                    f"DocuSign status changed for '{doc.original_filename}': "
+                    f"{previous or 'none'} -> {normalized}."
+                ),
+                tag_name="docusign",
+            )
+
+        db.session.commit()
+
+        return jsonify(
+            success=True,
+            doc_id=doc_id,
+            envelope_id=envelope_id,
+            status=doc.docusign_status,
+            completed_at=(doc.docusign_completed_at.isoformat() if doc.docusign_completed_at else None),
+            signed_pdf_path=doc.signed_pdf_path,
+        )
+
+    @bp.route("/docusign/webhook", methods=["POST"])
+    def docusign_webhook():
+        """DocuSign Connect webhook endpoint.
+
+        Validates optional HMAC signature and updates document status by envelope ID.
+        """
+        raw_body = request.get_data(cache=False, as_text=False) or b""
+        configured_secret = (current_app.config.get("DOCUSIGN_WEBHOOK_HMAC") or "").strip()
+        if not configured_secret:
+            from app.models import SystemSetting
+            configured_secret = (SystemSetting.get_value("docusign.webhook_hmac", "") or "").strip()
+
+        incoming_sig = (request.headers.get("X-DocuSign-Signature-1") or "").strip()
+        if configured_secret:
+            digest = hmac.new(configured_secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+            expected_sig = base64.b64encode(digest).decode("ascii")
+            if not incoming_sig or not hmac.compare_digest(incoming_sig, expected_sig):
+                return jsonify(success=False, error="Invalid webhook signature."), 401
+
+        envelope_id, status, completed_at = _extract_docusign_webhook_event(
+            raw_body,
+            request.headers.get("Content-Type") or "",
+        )
+        if not envelope_id:
+            return jsonify(success=True, message="Ignored webhook: envelope_id missing."), 200
+
+        doc = CustomerDocument.query.filter_by(docusign_envelope_id=envelope_id).first()
+        if not doc:
+            return jsonify(success=True, message="Envelope not linked to any document."), 200
+
+        customer = Customer.query.get(doc.customer_id)
+        prev_status = (doc.docusign_status or "").strip().lower()
+        new_status = (status or prev_status or "unknown").strip().lower()
+        doc.docusign_status = new_status
+
+        if new_status == "completed" and not doc.docusign_completed_at:
+            doc.docusign_completed_at = datetime.utcnow()
+
+            # Pull combined signed PDF and store to active document storage.
+            try:
+                from app.services.docusign_service import DocuSignService
+                ds = DocuSignService(current_app._get_current_object())
+                signed_pdf = ds.download_signed_document(envelope_id)
+
+                signed_name = (doc.original_filename or f"document_{doc.id}.html").replace(".html", "") + "_signed.pdf"
+                upload_file = FileStorage(
+                    stream=io.BytesIO(signed_pdf),
+                    filename=signed_name,
+                    content_type="application/pdf",
+                )
+                storage = StorageService(current_app._get_current_object())
+                saved = storage.save_document(upload_file, signed_name, doc.customer_id)
+                if saved.success:
+                    doc.signed_pdf_path = (saved.blob_url or saved.file_path or "").strip() or None
+            except Exception:
+                pass
+
+        if customer and prev_status != new_status:
+            log_history(
+                customer.id,
+                action="docusign-webhook",
+                changes_summary=(
+                    f"DocuSign webhook update for '{doc.original_filename}': "
+                    f"{prev_status or 'none'} -> {new_status}."
+                ),
+                tag_name="docusign",
+            )
+
+        db.session.commit()
+
+        return jsonify(
+            success=True,
+            envelope_id=envelope_id,
+            status=new_status,
+            completed_at=(doc.docusign_completed_at.isoformat() if doc.docusign_completed_at else completed_at or None),
+        )

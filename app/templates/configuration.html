@@ -897,6 +897,46 @@
         {% endif %}
       </section>
 
+      <section class="panel config-card mobile-collapsible" id="docusign-config">
+        <h3>DocuSign e-Signature</h3>
+        <p class="hint">Connect to DocuSign so you can send documents directly to customers for electronic signature from the Document Editor.</p>
+        <p class="hint" style="margin-top:4px;">
+          <strong>How it works:</strong> You click <em>Send for Signature</em> on a saved document → Ambifo converts it to PDF → uploads to DocuSign → DocuSign emails the customer automatically → customer signs in their browser (no account needed) → you see the signed status update here.
+        </p>
+        <form method="post" class="grid-form">
+          <input type="hidden" name="action" value="save_docusign">
+
+          <label>Integration Key (Client ID)
+            <input name="docusign_integration_key" value="{{ docusign.integration_key if docusign else '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          </label>
+          <label>API Account ID
+            <input name="docusign_account_id" value="{{ docusign.account_id if docusign else '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          </label>
+          <label>Impersonated User ID (GUID)
+            <input name="docusign_user_id" value="{{ docusign.user_id if docusign else '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          </label>
+          <label>API Base URL
+            <input name="docusign_base_url" value="{{ docusign.base_url if docusign else 'https://account-d.docusign.com' }}" placeholder="https://account-d.docusign.com">
+          </label>
+          <label class="full">Webhook HMAC Secret <span class="hint">(for verifying DocuSign Connect notifications)</span>
+            <input type="password" name="docusign_webhook_hmac" value="{{ docusign.webhook_hmac if docusign else '' }}" placeholder="Leave blank to skip webhook validation">
+          </label>
+          <label class="full">RSA Private Key (PEM) <span class="hint">(leave blank to keep existing key)</span>
+            <textarea name="docusign_private_key" rows="7" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----&#10;(paste your DocuSign RSA private key here — stored securely in DB)"></textarea>
+          </label>
+
+          <p class="hint full" style="margin-top:0;">
+            <strong>Setup steps:</strong>
+            1. In DocuSign Admin → Apps &amp; Keys → create an Integration Key.<br>
+            2. Add an RSA keypair, copy the private key here.<br>
+            3. Grant consent: visit <code>https://account-d.docusign.com/oauth/auth?response_type=code&amp;scope=signature%20impersonation&amp;client_id=YOUR_KEY&amp;redirect_uri=https://www.docusign.com</code><br>
+            4. Use Sandbox URL <code>https://account-d.docusign.com</code> for testing, <code>https://account.docusign.com</code> for production.
+          </p>
+
+          <button class="btn" type="submit">Save DocuSign Settings</button>
+        </form>
+      </section>
+
       <section class="panel config-card mobile-collapsible" id="restart-config">
         <h3>Restart Application</h3>
         <p class="hint">Use this after changing startup-level settings (for example database connection in appsettings.json).</p>
@@ -923,6 +963,7 @@
         <a href="#cloud-config">Cloud Operators</a>
         <a href="#update-tags-config">Update Tags</a>
         <a href="#admin-users-config">Admin Users</a>
+        <a href="#docusign-config">DocuSign e-Signature</a>
         <a href="#restart-config">Restart Application</a>
       </div>
     </aside>

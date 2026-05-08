@@ -275,6 +275,17 @@ def _get_meeting_settings():
     }
 
 
+def _get_docusign_settings():
+    return {
+        "integration_key": SystemSetting.get_value("docusign.integration_key", "") or "",
+        "account_id": SystemSetting.get_value("docusign.account_id", "") or "",
+        "user_id": SystemSetting.get_value("docusign.user_id", "") or "",
+        "base_url": SystemSetting.get_value("docusign.base_url", "https://account-d.docusign.com") or "https://account-d.docusign.com",
+        "private_key": SystemSetting.get_value("docusign.private_key", "") or "",
+        "webhook_hmac": SystemSetting.get_value("docusign.webhook_hmac", "") or "",
+    }
+
+
 def _get_effective_app_base_url():
     configured = (SystemSetting.get_value("app.base_url", "") or "").strip()
     if configured:
@@ -486,6 +497,8 @@ def _tag_color_map():
 
 def _derive_tag_from_action(action):
     action_text = (action or "").lower()
+    if "docusign" in action_text:
+        return "docusign"
     if "document" in action_text:
         return "document"
     if "meeting" in action_text:
@@ -2030,6 +2043,23 @@ def configuration():
             db.session.commit()
             flash("Teams configuration saved.", "success")
 
+        elif action == "save_docusign":
+            base_url = (request.form.get("docusign_base_url") or "https://account-d.docusign.com").strip()
+            if not base_url.startswith("http://") and not base_url.startswith("https://"):
+                flash("DocuSign Base URL must start with https://", "error")
+                return redirect(url_for("crm.configuration") + "#docusign-config")
+            SystemSetting.set_value("docusign.integration_key", (request.form.get("docusign_integration_key") or "").strip())
+            SystemSetting.set_value("docusign.account_id", (request.form.get("docusign_account_id") or "").strip())
+            SystemSetting.set_value("docusign.user_id", (request.form.get("docusign_user_id") or "").strip())
+            SystemSetting.set_value("docusign.base_url", base_url.rstrip("/"))
+            private_key = request.form.get("docusign_private_key") or ""
+            if private_key.strip():
+                SystemSetting.set_value("docusign.private_key", private_key.strip())
+            SystemSetting.set_value("docusign.webhook_hmac", (request.form.get("docusign_webhook_hmac") or "").strip())
+            db.session.commit()
+            flash("DocuSign configuration saved.", "success")
+            return redirect(url_for("crm.configuration") + "#docusign-config")
+
         elif action == "save_meeting_settings":
             raw_days = (request.form.get("meeting_availability_link_expiry_days") or "7").strip()
             try:
@@ -2589,6 +2619,7 @@ def configuration():
     teams_settings = _get_teams_settings()
     meeting_settings = _get_meeting_settings()
     ai_settings = _get_ai_settings()
+    docusign_settings = _get_docusign_settings()
     app_settings = {
         "base_url": _get_effective_app_base_url(),
     }
@@ -2642,6 +2673,7 @@ def configuration():
         teams=teams_settings,
         meeting=meeting_settings,
         ai=ai_settings,
+        docusign=docusign_settings,
         app_settings=app_settings,
         document_storage=document_storage_settings,
         sow_master_templates=sow_master_templates,

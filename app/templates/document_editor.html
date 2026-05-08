@@ -15,8 +15,9 @@
     :root {
       --tb-h: 48px;       /* toolbar row-1 height  */
       --tb2-h: 42px;      /* toolbar row-2 height  */
+      --tb3-h: 40px;      /* toolbar row-3 height  */
       --fb-h: 40px;       /* format bar height     */
-      --nav: calc(var(--tb-h) + var(--tb2-h) + var(--fb-h));
+      --nav: calc(var(--tb-h) + var(--tb2-h) + var(--tb3-h) + var(--fb-h));
       --navy: #0f4c3a;
       --blue: #0d7f5f;
       --bg:   #e8edf2;
@@ -48,7 +49,7 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     #loading-overlay.hidden { display: none; }
 
-    /* ── main toolbar (2 rows) ────────────────────────────────────────── */
+    /* ── main toolbar (3 rows) ────────────────────────────────────────── */
     #toolbar {
       position: fixed; top: 0; left: 0; right: 0; z-index: 500;
       background: var(--navy); color: #fff;
@@ -64,6 +65,15 @@
       display: flex; align-items: center; gap: 6px; padding: 0 12px;
       height: var(--tb2-h); width: 100%; flex-shrink: 0;
       background: #0c3829; border-top: 1px solid rgba(255,255,255,.1);
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    #toolbar-r3 {
+      display: flex; align-items: center; gap: 6px; padding: 0 12px;
+      height: var(--tb3-h); width: 100%; flex-shrink: 0;
+      background: #114734; border-top: 1px solid rgba(255,255,255,.08);
+      overflow-x: auto;
+      white-space: nowrap;
     }
     #toolbar .t-back {
       color: #90caf9; text-decoration: none; font-size: .8rem;
@@ -105,7 +115,7 @@
 
     /* ── format bar ──────────────────────────────────────────────────── */
     #fbar {
-      position: fixed; top: calc(var(--tb-h) + var(--tb2-h)); left: 0; right: 0; z-index: 490;
+      position: fixed; top: calc(var(--tb-h) + var(--tb2-h) + var(--tb3-h)); left: 0; right: 0; z-index: 490;
       height: var(--fb-h);
       background: #1b6349;
       display: flex; align-items: center; gap: 3px; padding: 0 12px;
@@ -239,6 +249,115 @@
       font-size: .85rem; z-index: 9000; max-width: 90vw; text-align: center;
     }
 
+    /* ── compact responsive mode ────────────────────────────────────── */
+    @media (max-width: 980px) {
+      #toolbar-r1,
+      #toolbar-r2,
+      #toolbar-r3 {
+        height: auto;
+        min-height: 42px;
+        padding: 7px 10px;
+        flex-wrap: wrap;
+        row-gap: 6px;
+      }
+
+      #toolbar .sep,
+      #toolbar .gap {
+        display: none;
+      }
+
+      #toolbar .t-title {
+        width: 100%;
+        font-size: .84rem;
+      }
+
+      #toolbar .meta-inline {
+        flex-wrap: wrap;
+      }
+
+      #toolbar input#doc-title {
+        width: 100%;
+        max-width: 100%;
+      }
+
+      #toolbar input#doc-ref-no,
+      #toolbar input#doc-version,
+      #toolbar input#doc-date,
+      #toolbar input#doc-expiry-days,
+      #toolbar select {
+        max-width: 100%;
+      }
+
+      #toolbar button,
+      #toolbar .t-back {
+        padding: .26rem .52rem;
+        font-size: .74rem;
+      }
+
+      #toolbar #save-status {
+        width: 100%;
+      }
+
+      #fbar {
+        position: static;
+        height: auto;
+        min-height: 40px;
+        padding: 6px 10px;
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+
+      #fbar button,
+      #fbar select {
+        font-size: .75rem;
+      }
+
+      #canvas {
+        padding-top: 14px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      #toolbar {
+        position: static;
+      }
+
+      #toolbar-r1,
+      #toolbar-r2,
+      #toolbar-r3 {
+        align-items: flex-start;
+      }
+
+      #toolbar .meta-inline {
+        width: 100%;
+      }
+
+      /* Keep primary workflow actions first on mobile */
+      #btn-save { order: 1; }
+      #btn-docusign { order: 2; }
+      #btn-docusign-refresh { order: 3; }
+      #btn-docusign-download { order: 4; }
+      #btn-load { order: 5; }
+      #btn-html { order: 6; }
+      #btn-pdf { order: 7; }
+      #save-status { order: 8; }
+
+      #toolbar-r1 {
+        display: flex;
+      }
+
+      #toolbar #doc-template-select,
+      #toolbar #opportunity-doc-select {
+        width: 100%;
+      }
+
+      #btn-docusign,
+      #btn-docusign-refresh,
+      #btn-docusign-download {
+        min-height: 30px;
+      }
+    }
+
     /* ── print styles ────────────────────────────────────────────────── */
     @media print {
       @page { size: A4; margin: 0; }
@@ -282,9 +401,13 @@
     <span class="sep"></span>
     <button class="btn-html"      id="btn-html">&#8659; HTML</button>
     <button class="btn-print-pdf" id="btn-pdf">&#128438; Print / PDF</button>
+    {% if opportunity_customer %}
+    <span class="sep"></span>
+    <button id="btn-docusign" style="background:#1a3d6e !important;border-color:#2563eb !important;" title="Send this document to the customer for e-signature via DocuSign">&#9997; Send for Signature</button>
+    {% endif %}
   </div>
 
-  <!-- Row 2: Ref No + Version + Date + Template -->
+  <!-- Row 2: Document Meta -->
   <div id="toolbar-r2">
     <span class="meta-inline">
       <label for="doc-ref-no">Ref No</label>
@@ -317,8 +440,11 @@
       </select>
       <button id="btn-load-template" title="Load selected template into document">Load</button>
     </span>
+  </div>
+
+  <!-- Row 3: Saved Docs + DocuSign -->
+  <div id="toolbar-r3">
     {% if opportunity_customer %}
-    <span class="sep"></span>
     <span class="meta-inline">
       <label for="opportunity-doc-select">Saved Docs</label>
       <select id="opportunity-doc-select" title="Load saved opportunity document">
@@ -328,6 +454,16 @@
         {% endfor %}
       </select>
     </span>
+    <span class="meta-inline">
+      <label>DocuSign</label>
+      <span id="docusign-status-chip" style="padding:3px 8px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:.72rem;font-weight:700;min-width:76px;text-align:center;">none</span>
+      <button id="btn-docusign-refresh" type="button" title="Refresh DocuSign status">Refresh</button>
+      <button id="btn-docusign-download" type="button" title="Download signed PDF" style="display:none;">Signed PDF</button>
+    </span>
+    <span class="gap"></span>
+    <span class="meta-inline" style="font-size:.74rem;color:#c8e6c9;">Mode: Opportunity</span>
+    {% else %}
+    <span class="meta-inline" style="font-size:.74rem;color:#c8e6c9;">Mode: Standalone Document</span>
     {% endif %}
   </div>
 
@@ -476,6 +612,7 @@ const EDITOR_MODE = {{ ('opportunity' if opportunity_customer else 'standalone')
 const OPPORTUNITY_CUSTOMER_ID = {{ (opportunity_customer.id if opportunity_customer else None) | tojson }};
 const OPPORTUNITY_SAVE_URL = {{ (url_for('crm.opportunity_document_editor_save', customer_id=opportunity_customer.id) if opportunity_customer else '') | tojson }};
 const OPPORTUNITY_LOAD_URL_BASE = {{ (url_for('crm.opportunity_document_editor_load', customer_id=opportunity_customer.id, doc_id=0) if opportunity_customer else '') | tojson }}.replace(/0$/, '');
+const DOCUSIGN_SIGNED_DOWNLOAD_URL_BASE = {{ (url_for('crm.download_signed_docusign_pdf', customer_id=opportunity_customer.id, doc_id=0) if opportunity_customer else '') | tojson }}.replace(/0$/, '');
 const INITIAL_EDITOR_DOCUMENT = {{ initial_editor_document | tojson }};
 const BRAND = {
   companyName:  {{ sow_brand_cfg.company_name | tojson }},
@@ -505,6 +642,32 @@ function showErr(msg) {
   errBnr.textContent = '⚠ ' + msg;
   errBnr.style.display = 'block';
   setTimeout(() => { errBnr.style.display = 'none'; }, 6000);
+}
+
+function setDocusignStatusChip(statusValue) {
+  const chip = document.getElementById('docusign-status-chip');
+  if (!chip) return;
+  const status = String(statusValue || 'none').trim().toLowerCase() || 'none';
+  const map = {
+    none:      { bg: '#e2e8f0', fg: '#334155' },
+    sent:      { bg: '#dbeafe', fg: '#1e3a8a' },
+    delivered: { bg: '#e0f2fe', fg: '#0c4a6e' },
+    completed: { bg: '#dcfce7', fg: '#14532d' },
+    declined:  { bg: '#fee2e2', fg: '#7f1d1d' },
+    voided:    { bg: '#f1f5f9', fg: '#334155' },
+    error:     { bg: '#fee2e2', fg: '#7f1d1d' },
+  };
+  const cfg = map[status] || { bg: '#f1f5f9', fg: '#334155' };
+  chip.textContent = status;
+  chip.style.background = cfg.bg;
+  chip.style.color = cfg.fg;
+}
+
+function updateSignedPdfButton(statusValue) {
+  const btn = document.getElementById('btn-docusign-download');
+  if (!btn) return;
+  const status = String(statusValue || '').trim().toLowerCase();
+  btn.style.display = (status === 'completed' && !!currentOpportunityDocId) ? 'inline-flex' : 'none';
 }
 
 function todayStr() {
@@ -1270,6 +1433,12 @@ async function saveDoc() {
       opt.textContent = result.filename || `${data.title}.html`;
       select.value = idStr;
     }
+    if (typeof refreshDocusignStatus === 'function') {
+      void refreshDocusignStatus();
+    } else {
+      setDocusignStatusChip('none');
+      updateSignedPdfButton('none');
+    }
   } else {
     localStorage.setItem(DOC_STORAGE_KEY, JSON.stringify(data));
     localStorage.setItem(DOC_REF_DRAFT_KEY, data.refNo || '');
@@ -1292,6 +1461,11 @@ function applyLoadedDocument(data) {
 
   const htmlContent = data.content_html || data.contentHtml || '';
   loadContentHtmlIntoDocument(htmlContent);
+
+  if (isOpportunityMode()) {
+    setDocusignStatusChip(data.docusign_status || 'none');
+    updateSignedPdfButton(data.docusign_status || 'none');
+  }
 }
 
 async function loadDoc() {
@@ -1318,6 +1492,9 @@ async function loadDoc() {
     applyLoadedDocument(result.document);
     setRefLocked(true);
     if (select) select.value = String(currentOpportunityDocId);
+    if (typeof refreshDocusignStatus === 'function') {
+      void refreshDocusignStatus();
+    }
     return;
   }
 
@@ -1387,6 +1564,11 @@ async function initDocumentEditor() {
     syncHeaderMetaMirrors();
   }
 
+  if (isOpportunityMode()) {
+    setDocusignStatusChip((INITIAL_EDITOR_DOCUMENT && INITIAL_EDITOR_DOCUMENT.docusign_status) || 'none');
+    updateSignedPdfButton((INITIAL_EDITOR_DOCUMENT && INITIAL_EDITOR_DOCUMENT.docusign_status) || 'none');
+  }
+
   overlay.classList.add('hidden');
 }
 
@@ -1394,7 +1576,178 @@ void initDocumentEditor();
 
 // Expose for devtools
 window._editors = editors;
+
+// ── DocuSign: Send for Signature ──────────────────────────────────────────
+{% if opportunity_customer %}
+const DOCUSIGN_SEND_URL = {{ url_for('crm.opportunity_docusign_send', customer_id=opportunity_customer.id) | tojson }};
+const DOCUSIGN_STATUS_URL_BASE = {{ url_for('crm.opportunity_docusign_status', customer_id=opportunity_customer.id, doc_id=0) | tojson }}.replace(/\/0$/, '/');
+
+async function refreshDocusignStatus() {
+  if (!currentOpportunityDocId) {
+    setDocusignStatusChip('none');
+    updateSignedPdfButton('none');
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${DOCUSIGN_STATUS_URL_BASE}${currentOpportunityDocId}`, {
+      method: 'GET',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) {
+      setDocusignStatusChip('error');
+      updateSignedPdfButton('none');
+      return;
+    }
+    setDocusignStatusChip(result.status || 'none');
+    updateSignedPdfButton(result.status || 'none');
+  } catch (_err) {
+    setDocusignStatusChip('error');
+    updateSignedPdfButton('none');
+  }
+}
+
+document.getElementById('btn-docusign-refresh').addEventListener('click', () => {
+  void refreshDocusignStatus();
+});
+
+document.getElementById('btn-docusign-download').addEventListener('click', () => {
+  if (!currentOpportunityDocId) {
+    showErr('Please choose a saved document first.');
+    return;
+  }
+  window.location.href = `${DOCUSIGN_SIGNED_DOWNLOAD_URL_BASE}${currentOpportunityDocId}`;
+});
+
+document.getElementById('btn-docusign').addEventListener('click', () => {
+  if (!currentOpportunityDocId) {
+    showErr('Please save the document first before sending for signature.');
+    return;
+  }
+  const signerName = document.getElementById('ds-signer-name');
+  const signerEmail = document.getElementById('ds-signer-email');
+  if (signerName) {
+    signerName.value = signerName.dataset.default || signerName.value;
+    signerEmail.value = signerEmail.dataset.default || signerEmail.value;
+  }
+  document.getElementById('docusign-modal-backdrop').classList.add('open');
+});
+
+document.getElementById('ds-modal-cancel').addEventListener('click', () => {
+  document.getElementById('docusign-modal-backdrop').classList.remove('open');
+});
+
+document.getElementById('docusign-modal-backdrop').addEventListener('click', e => {
+  if (e.target === e.currentTarget) {
+    document.getElementById('docusign-modal-backdrop').classList.remove('open');
+  }
+});
+
+document.getElementById('ds-modal-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const signerName  = document.getElementById('ds-signer-name').value.trim();
+  const signerEmail = document.getElementById('ds-signer-email').value.trim();
+  const emailSubject = document.getElementById('ds-email-subject').value.trim();
+  const emailBody    = document.getElementById('ds-email-body').value.trim();
+
+  const btn = document.getElementById('ds-modal-send');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+
+  try {
+    const resp = await fetch(DOCUSIGN_SEND_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: JSON.stringify({
+        doc_id: currentOpportunityDocId,
+        signer_name: signerName,
+        signer_email: signerEmail,
+        email_subject: emailSubject || null,
+        email_body: emailBody || null,
+      }),
+    });
+    const result = await resp.json();
+    document.getElementById('docusign-modal-backdrop').classList.remove('open');
+    if (result.success) {
+      const s = document.getElementById('save-status');
+      s.textContent = '✉ Sent for signature (envelope: ' + (result.envelope_id || '') + ')';
+      setTimeout(() => s.textContent = '', 8000);
+      setDocusignStatusChip('sent');
+      updateSignedPdfButton('sent');
+      void refreshDocusignStatus();
+    } else {
+      showErr('DocuSign error: ' + (result.error || 'Unknown error'));
+    }
+  } catch (err) {
+    showErr('Send failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+});
+{% endif %}
 </script>
+
+{% if opportunity_customer %}
+<!-- ── DocuSign Modal ─────────────────────────────────────────────────── -->
+<style>
+#docusign-modal-backdrop { display:none; }
+#docusign-modal-backdrop.open { display:flex; }
+</style>
+<div id="docusign-modal-backdrop" style="
+  position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9998;
+  align-items:center;justify-content:center;padding:16px;">
+  <div style="
+    width:min(520px,100%);background:#fff;border-radius:12px;
+    border:1px solid #cbd5e1;box-shadow:0 18px 45px rgba(15,23,42,.35);padding:20px;">
+    <h4 style="margin:0 0 6px;font-size:1rem;">&#9997; Send for Signature via DocuSign</h4>
+    <p style="margin:0 0 14px;font-size:.83rem;color:#475569;">
+      DocuSign will email the signer directly with a link to sign in their browser.
+      No DocuSign account is needed for the recipient.
+    </p>
+    <form id="ds-modal-form" class="grid-form" style="gap:10px;">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:.85rem;">
+        Signer Name
+        <input id="ds-signer-name" required placeholder="Customer full name"
+               value="{{ opportunity_customer.customer_name }}"
+               data-default="{{ opportunity_customer.customer_name }}"
+               style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:.88rem;">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:.85rem;">
+        Signer Email
+        <input id="ds-signer-email" type="email" required placeholder="customer@example.com"
+               value="{{ opportunity_customer.email }}"
+               data-default="{{ opportunity_customer.email }}"
+               style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:.88rem;">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:.85rem;">
+        Email Subject <span style="color:#94a3b8;">(optional)</span>
+        <input id="ds-email-subject" placeholder="Please sign: [document name]"
+               style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:.88rem;">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:.85rem;">
+        Email Message <span style="color:#94a3b8;">(optional)</span>
+        <textarea id="ds-email-body" rows="3" placeholder="Please review and sign..."
+                  style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:.88rem;resize:vertical;"></textarea>
+      </label>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px;">
+        <button type="button" id="ds-modal-cancel"
+                style="padding:7px 16px;border:1px solid #cbd5e1;border-radius:7px;background:#f8fafc;cursor:pointer;font-size:.85rem;">
+          Cancel
+        </button>
+        <button type="submit" id="ds-modal-send"
+                style="padding:7px 18px;border:none;border-radius:7px;background:#1a3d6e;color:#fff;cursor:pointer;font-size:.85rem;font-weight:600;">
+          Send
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
 
 </body>
 </html>
