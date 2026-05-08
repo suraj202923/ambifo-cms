@@ -756,6 +756,11 @@
           </div>
           <div class="doc-actions">
             <a class="mini-btn" href="{{ url_for('crm.opportunity_document_download', customer_id=customer.id, doc_id=doc.id) }}">⬇ Download</a>
+            {% if doc.description and doc.description.startswith('[Document Editor]') %}
+            <a class="mini-btn" href="{{ url_for('crm.opportunity_document_editor', customer_id=customer.id, doc_id=doc.id) }}">✏ Edit</a>
+            <a class="mini-btn" href="{{ url_for('crm.opportunity_document_download_docx', customer_id=customer.id, doc_id=doc.id) }}">📄 DOC</a>
+            <a class="mini-btn" href="{{ url_for('crm.opportunity_document_download_pdf', customer_id=customer.id, doc_id=doc.id) }}">🧾 PDF</a>
+            {% endif %}
             <form method="post" action="{{ url_for('crm.opportunity_document_delete', customer_id=customer.id, doc_id=doc.id) }}" onsubmit="return confirm('Delete this document?');" style="margin:0;">
               <button class="mini-btn danger" type="submit">🗑️ Delete</button>
             </form>
@@ -943,7 +948,7 @@
       <button class="sidebar-tab" data-tab="documents" onclick="switchTab('documents',this)">📁 Documents</button>
       <button class="sidebar-tab" data-tab="diagrams" onclick="switchTab('diagrams',this)">📐 Create Diagram</button>
       {% if is_edit %}
-      <a class="sidebar-tab" href="{{ url_for('crm.opportunity_sow', customer_id=customer.id) }}" style="display:block;text-align:left;text-decoration:none;color:inherit;">📄 Create Document</a>
+      <a class="sidebar-tab" href="{{ url_for('crm.opportunity_document_editor', customer_id=customer.id) }}" style="display:block;text-align:left;text-decoration:none;color:inherit;">📄 Create Document</a>
       {% endif %}
     </nav>
     {% if customer %}

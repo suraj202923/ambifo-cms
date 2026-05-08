@@ -102,6 +102,9 @@ class Config:
     AWS_SECRET_ACCESS_KEY = str(_get_setting("AWS_SECRET_ACCESS_KEY", "Storage.AWS.SecretAccessKey", ""))
     AWS_S3_BUCKET = str(_get_setting("AWS_S3_BUCKET", "Storage.AWS.BucketName", ""))
     AWS_S3_REGION = str(_get_setting("AWS_S3_REGION", "Storage.AWS.Region", "us-east-1"))
+    GCP_PROJECT_ID = str(_get_setting("GCP_PROJECT_ID", "Storage.GCP.ProjectId", ""))
+    GCP_BUCKET_NAME = str(_get_setting("GCP_BUCKET_NAME", "Storage.GCP.BucketName", ""))
+    GCP_CREDENTIALS_JSON = str(_get_setting("GCP_CREDENTIALS_JSON", "Storage.GCP.CredentialsJson", ""))
 
     TEAMS_TENANT_ID = str(_get_setting("TEAMS_TENANT_ID", "Teams.TenantId", ""))
     TEAMS_CLIENT_ID = str(_get_setting("TEAMS_CLIENT_ID", "Teams.ClientId", ""))

@@ -5,3 +5,16 @@ __pycache__/
 instance/
 uploads/*
 !uploads/.gitkeep
+
+# Generated / temp documents
+documents/*
+!documents/.gitkeep
+
+# Data & uploaded files that should not be committed
+*.xlsx
+*.docx
+*.csv
+
+# OS / editor junk
+.DS_Store
+Thumbs.db

@@ -1,9 +1,10 @@
 """
 StorageService: abstract file storage for customer documents.
-Supports local filesystem, Azure Blob Storage, and AWS S3.
-Configure via appsettings.json Storage.Backend ("local" | "azure" | "aws").
+Supports local filesystem, Azure Blob Storage, AWS S3, and GCP Cloud Storage.
+Configure via appsettings.json Storage.Backend ("local" | "azure" | "aws" | "gcp").
 """
 
+import json
 import uuid
 from pathlib import Path
 
@@ -24,7 +25,7 @@ class StorageResult:
 class StorageService:
     def __init__(self, app):
         self.app = app
-        self.backend = app.config.get("DOCUMENT_STORAGE", "local")
+        self.backend = str(app.config.get("DOCUMENT_STORAGE", "local")).strip().lower()
 
     def save_document(self, file_obj, original_filename, customer_id):
         """Save file_obj to the configured backend. Returns StorageResult."""
@@ -35,6 +36,8 @@ class StorageService:
             return self._save_azure(file_obj, unique_name)
         elif self.backend == "aws":
             return self._save_aws(file_obj, unique_name)
+        elif self.backend == "gcp":
+            return self._save_gcp(file_obj, unique_name)
         return self._save_local(file_obj, unique_name)
 
     # ── Local ──────────────────────────────────────────────────────────────────
@@ -127,6 +130,55 @@ class StorageService:
         except Exception as exc:
             return StorageResult(success=False, error=str(exc), storage_backend="aws")
 
+    # ── GCP Cloud Storage ─────────────────────────────────────────────────────
+
+    def _save_gcp(self, file_obj, filename):
+        try:
+            from google.cloud import storage  # noqa: PLC0415
+            from google.oauth2 import service_account  # noqa: PLC0415
+        except ImportError:
+            return StorageResult(
+                success=False,
+                error="google-cloud-storage is not installed. Run: pip install google-cloud-storage",
+                storage_backend="gcp",
+            )
+
+        try:
+            bucket_name = (self.app.config.get("GCP_BUCKET_NAME", "") or "").strip()
+            project_id = (self.app.config.get("GCP_PROJECT_ID", "") or "").strip()
+            credentials_json = (self.app.config.get("GCP_CREDENTIALS_JSON", "") or "").strip()
+
+            if not bucket_name:
+                return StorageResult(
+                    success=False,
+                    error="GCP bucket is not configured (Storage.GCP.BucketName).",
+                    storage_backend="gcp",
+                )
+
+            client = None
+            if credentials_json:
+                info = json.loads(credentials_json)
+                credentials = service_account.Credentials.from_service_account_info(info)
+                client = storage.Client(credentials=credentials, project=project_id or info.get("project_id"))
+            else:
+                client = storage.Client(project=project_id or None)
+
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(filename)
+
+            file_obj.seek(0)
+            blob.upload_from_file(file_obj)
+
+            blob_url = f"https://storage.googleapis.com/{bucket_name}/{filename}"
+            return StorageResult(
+                success=True,
+                blob_url=blob_url,
+                stored_filename=filename,
+                storage_backend="gcp",
+            )
+        except Exception as exc:
+            return StorageResult(success=False, error=str(exc), storage_backend="gcp")
+
     # ── Delete ─────────────────────────────────────────────────────────────────
 
     def delete_document(self, doc):
@@ -163,5 +215,30 @@ class StorageService:
                     region_name=region,
                 )
                 s3.delete_object(Bucket=bucket, Key=key)
+            except Exception:
+                pass
+
+        elif doc.storage_backend == "gcp" and doc.blob_url:
+            try:
+                from google.cloud import storage  # noqa: PLC0415
+                from google.oauth2 import service_account  # noqa: PLC0415
+
+                bucket_name = (self.app.config.get("GCP_BUCKET_NAME", "") or "").strip()
+                credentials_json = (self.app.config.get("GCP_CREDENTIALS_JSON", "") or "").strip()
+                project_id = (self.app.config.get("GCP_PROJECT_ID", "") or "").strip()
+
+                if not bucket_name:
+                    return
+
+                if credentials_json:
+                    info = json.loads(credentials_json)
+                    credentials = service_account.Credentials.from_service_account_info(info)
+                    client = storage.Client(credentials=credentials, project=project_id or info.get("project_id"))
+                else:
+                    client = storage.Client(project=project_id or None)
+
+                key = doc.stored_filename or doc.blob_url.split(f"/{bucket_name}/")[-1]
+                bucket = client.bucket(bucket_name)
+                bucket.blob(key).delete()
             except Exception:
                 pass

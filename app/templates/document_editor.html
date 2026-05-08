@@ -1,0 +1,1400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Document Editor — Ambifo CRM</title>
+
+  <!--
+    NOTE: paged.polyfill.js is NOT loaded here.
+    Loading it on page-open auto-rewrites the entire DOM and destroys TipTap.
+    It is loaded dynamically only when the user clicks Print/PDF.
+  -->
+
+  <style>
+    :root {
+      --tb-h: 48px;       /* toolbar row-1 height  */
+      --tb2-h: 42px;      /* toolbar row-2 height  */
+      --fb-h: 40px;       /* format bar height     */
+      --nav: calc(var(--tb-h) + var(--tb2-h) + var(--fb-h));
+      --navy: #0f4c3a;
+      --blue: #0d7f5f;
+      --bg:   #e8edf2;
+      --pw:   794px;      /* A4 page width  (px)   */
+      --pm:   72px;       /* A4 page margin (px)   */
+      --page-header-space: {{ sow_brand_cfg.header_top_px }}px;
+      --page-footer-space: {{ sow_brand_cfg.footer_bottom_px }}px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body { background: var(--bg); font-family: 'Segoe UI', Arial, sans-serif; }
+
+    /* ── loading overlay ──────────────────────────────────────────────── */
+    #loading-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #fff;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 14px; font-size: 1rem; color: #334155;
+    }
+    #loading-overlay .spin {
+      width: 40px; height: 40px;
+      border: 4px solid #e2e8f0;
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-overlay.hidden { display: none; }
+
+    /* ── main toolbar (2 rows) ────────────────────────────────────────── */
+    #toolbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 500;
+      background: var(--navy); color: #fff;
+      display: flex; flex-direction: column;
+      box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    }
+    #toolbar-r1 {
+      display: flex; align-items: center; gap: 6px; padding: 0 12px;
+      height: var(--tb-h); width: 100%; flex-shrink: 0;
+      background: var(--navy);
+    }
+    #toolbar-r2 {
+      display: flex; align-items: center; gap: 6px; padding: 0 12px;
+      height: var(--tb2-h); width: 100%; flex-shrink: 0;
+      background: #0c3829; border-top: 1px solid rgba(255,255,255,.1);
+    }
+    #toolbar .t-back {
+      color: #90caf9; text-decoration: none; font-size: .8rem;
+      border: 1px solid rgba(255,255,255,.25); padding: .28rem .55rem;
+      border-radius: 5px; white-space: nowrap; flex-shrink: 0;
+    }
+    #toolbar .t-back:hover { background: rgba(255,255,255,.12); }
+    #toolbar .t-title { font-size: .9rem; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+    #toolbar .sep { width: 1px; height: 26px; background: rgba(255,255,255,.25); flex-shrink: 0; margin: 0 2px; }
+    #toolbar .gap { flex: 1; }
+    #toolbar .meta-inline { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    #toolbar .meta-inline label { font-size: .72rem; color: #d4f5e9; white-space: nowrap; }
+    #toolbar input#doc-title {
+      font-size: .82rem; padding: 4px 8px; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.1);
+      color: #fff; width: 200px; flex-shrink: 0;
+    }
+    #toolbar input#doc-ref-no,
+    #toolbar input#doc-version,
+    #toolbar input#doc-date {
+      font-size: .78rem; padding: 4px 8px; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.1);
+      color: #fff; flex-shrink: 0;
+    }
+    #toolbar input#doc-ref-no { width: 185px; }
+    #toolbar input#doc-version { width: 78px; }
+    #toolbar input#doc-date { width: 138px; }
+    #toolbar input#doc-expiry-days { width: 52px; }
+    #toolbar input#doc-title::placeholder { color: rgba(255,255,255,.5); }
+    #toolbar button {
+      font-size: .78rem; padding: .3rem .65rem; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.1);
+      color: #fff; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    }
+    #toolbar button:hover { background: rgba(255,255,255,.22); }
+    #toolbar #save-status { font-size: .72rem; color: #a5d6a7; white-space: nowrap; flex-shrink: 0; }
+    .btn-print-pdf { background: #4e342e !important; border-color: #6d4c41 !important; }
+    .btn-html      { background: #1565c0 !important; border-color: #1e88e5 !important; }
+
+    /* ── format bar ──────────────────────────────────────────────────── */
+    #fbar {
+      position: fixed; top: calc(var(--tb-h) + var(--tb2-h)); left: 0; right: 0; z-index: 490;
+      height: var(--fb-h);
+      background: #1b6349;
+      display: flex; align-items: center; gap: 3px; padding: 0 12px;
+      overflow-x: auto; flex-wrap: nowrap;
+      box-shadow: 0 1px 6px rgba(0,0,0,.2);
+    }
+    #fbar button {
+      font-size: .8rem; padding: 3px 8px; border-radius: 5px;
+      border: 1px solid rgba(255,255,255,.2); background: transparent;
+      color: #fff; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+      min-width: 28px; text-align: center;
+    }
+    #fbar button:hover   { background: rgba(255,255,255,.15); }
+    #fbar button.active  { background: rgba(255,255,255,.3); font-weight: 700; }
+    #fbar select {
+      font-size: .78rem; padding: 3px 5px; border-radius: 5px;
+      border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.1);
+      color: #fff; cursor: pointer; flex-shrink: 0;
+    }
+    #fbar select option { color: #000; background: #fff; }
+    #fbar input[type=color] {
+      width: 28px; height: 26px; border: none; border-radius: 4px;
+      cursor: pointer; padding: 1px; background: transparent; flex-shrink: 0;
+    }
+    #fbar .fs { width: 1px; height: 22px; background: rgba(255,255,255,.2); flex-shrink: 0; margin: 0 3px; }
+
+    /* ── canvas ──────────────────────────────────────────────────────── */
+    #canvas {
+      padding-top: calc(var(--nav) + 20px);
+      padding-bottom: 60px;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 24px;
+      min-height: 100vh;
+    }
+
+    /* ── A4 page ──────────────────────────────────────────────────────── */
+    .a4-page {
+      width: var(--pw);
+      height: 1123px;
+      min-height: 1123px;
+      background: #fff;
+      box-shadow: 0 4px 28px rgba(0,0,0,.22);
+      border-radius: 2px;
+      display: flex; flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .pg-header {
+      padding: 8px var(--pm);
+      border-bottom: 2px solid #e4ebf5;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      font-size: .7rem; color: #64748b;
+      min-height: max(var(--page-header-space), 84px);
+      flex: 0 0 auto;
+    }
+    .pg-header .brand-col { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .pg-header .brand-logo { height: 42px; width: auto; object-fit: contain; flex: 0 0 auto; }
+    .pg-header .brand { font-weight: 700; color: var(--navy); font-size: .94rem; letter-spacing: .03em; text-transform: uppercase; }
+    .pg-header .chips { font-size: .76rem; color: #315b92; line-height: 1.35; }
+    .pg-header .meta  { text-align: right; line-height: 1.35; font-size: .7rem; white-space: nowrap; }
+    .pg-header .meta .meta-row { display: flex; justify-content: flex-end; gap: 6px; }
+    .pg-header .meta .meta-row strong { color: #0f2f5f; }
+    .pg-header .meta .meta-row .expiry-val { color: #b91c1c; font-weight: 700; }
+
+    .pg-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      padding: 28px var(--pm);
+      height: calc(1123px - var(--page-header-space) - var(--page-footer-space));
+      overflow: hidden;
+    }
+
+    /* TipTap ProseMirror editor area */
+    .pg-body .ProseMirror {
+      outline: none;
+      height: 100%;
+      min-height: 100%;
+      overflow: hidden;
+      font-size: 10.5pt;
+      line-height: 1.7;
+      color: #1a202c;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .pg-body .ProseMirror p                { margin-bottom: .55em; }
+    .pg-body .ProseMirror h1               { font-size: 1.9em;  color: var(--navy); margin: 1em 0 .35em; }
+    .pg-body .ProseMirror h2               { font-size: 1.45em; color: var(--navy); margin: .85em 0 .3em; }
+    .pg-body .ProseMirror h3               { font-size: 1.15em; color: var(--navy); margin: .8em 0 .28em; }
+    .pg-body .ProseMirror ul,
+    .pg-body .ProseMirror ol               { padding-left: 1.5em; margin-bottom: .55em; }
+    .pg-body .ProseMirror li               { margin-bottom: .2em; }
+    .pg-body .ProseMirror blockquote       { border-left: 3px solid #94a3b8; padding-left: 14px; color: #475569; margin: .6em 0; }
+    .pg-body .ProseMirror code             { background: #f1f5f9; border-radius: 4px; padding: 1px 5px; font-size: .88em; }
+    .pg-body .ProseMirror pre              { background: #1e293b; color: #e2e8f0; border-radius: 6px; padding: 12px 16px; margin-bottom: .7em; overflow-x: auto; }
+    .pg-body .ProseMirror pre code        { background: none; padding: 0; }
+    .pg-body .ProseMirror table            { width: 100%; border-collapse: collapse; margin-bottom: .8em; }
+    .pg-body .ProseMirror td,
+    .pg-body .ProseMirror th               { border: 1px solid #cbd5e1; padding: 6px 10px; font-size: .9em; }
+    .pg-body .ProseMirror th               { background: #f1f5f9; font-weight: 700; }
+    .pg-body .ProseMirror hr               { border: none; border-top: 2px solid #e2e8f0; margin: 1em 0; }
+    .pg-body .ProseMirror a                { color: var(--blue); text-decoration: underline; }
+    .pg-body .ProseMirror img              { max-width: 100%; border-radius: 4px; }
+    .pg-body .ProseMirror mark             { background: #fef08a; border-radius: 2px; padding: 0 2px; }
+
+    .pg-footer {
+      padding: 8px var(--pm);
+      border-top: 1px solid #e4ebf5;
+      font-size: .62rem; color: #64748b;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      min-height: var(--page-footer-space);
+      flex: 0 0 auto;
+    }
+    .pg-footer .left { line-height: 1.35; }
+    .pg-footer .mid { color: #b91c1c; text-align: center; flex: 1; font-weight: 700; }
+    .pg-footer .right { white-space: nowrap; text-align: right; color: #0f2f5f; font-weight: 700; }
+
+    /* ── add page button ─────────────────────────────────────────────── */
+    #btn-add-page {
+      width: var(--pw); padding: 9px 0;
+      background: #fff; border: 2px dashed #cbd5e1; border-radius: 8px;
+      color: #64748b; font-size: .85rem; cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    #btn-add-page:hover { border-color: var(--blue); color: var(--blue); }
+
+    /* ── error banner ────────────────────────────────────────────────── */
+    #err-banner {
+      display: none; position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: #c62828; color: #fff; padding: 10px 20px; border-radius: 8px;
+      font-size: .85rem; z-index: 9000; max-width: 90vw; text-align: center;
+    }
+
+    /* ── print styles ────────────────────────────────────────────────── */
+    @media print {
+      @page { size: A4; margin: 0; }
+      html, body { margin: 0 !important; padding: 0 !important; }
+      #toolbar, #fbar, #btn-add-page, #err-banner, #loading-overlay { display: none !important; }
+      #canvas { padding: 0 !important; gap: 0 !important; }
+      .a4-page {
+        width: 210mm; height: 297mm; min-height: 297mm;
+        break-after: page; page-break-after: always;
+        box-shadow: none !important; border-radius: 0 !important;
+      }
+      .a4-page:last-child { break-after: auto; page-break-after: auto; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- loading overlay -->
+<div id="loading-overlay">
+  <div class="spin"></div>
+  <span>Loading Document Editor…</span>
+</div>
+
+<!-- error banner -->
+<div id="err-banner"></div>
+
+<!-- ── Main Toolbar ───────────────────────────────────────────────────── -->
+<div id="toolbar">
+
+  <!-- Row 1: Navigation + Document Title + Actions -->
+  <div id="toolbar-r1">
+    <a class="t-back" href="{{ back_url or url_for('crm.dashboard') }}">&#8592; Back</a>
+    <span class="sep"></span>
+    <span class="t-title">Document Editor</span>
+    <span class="sep"></span>
+    <input id="doc-title" type="text" placeholder="Untitled Document" value="{{ (initial_editor_document.title if initial_editor_document else 'Untitled Document') }}">
+    <span class="gap"></span>
+    <button id="btn-save">&#128190; Save</button>
+    <button id="btn-load">&#128194; Load</button>
+    <span id="save-status"></span>
+    <span class="sep"></span>
+    <button class="btn-html"      id="btn-html">&#8659; HTML</button>
+    <button class="btn-print-pdf" id="btn-pdf">&#128438; Print / PDF</button>
+  </div>
+
+  <!-- Row 2: Ref No + Version + Date + Template -->
+  <div id="toolbar-r2">
+    <span class="meta-inline">
+      <label for="doc-ref-no">Ref No</label>
+      <input id="doc-ref-no" type="text" value="{{ initial_doc_ref_no or '' }}" readonly title="Auto-generated reference number">
+      <button id="btn-regenerate-ref" title="Generate new reference number">↻</button>
+    </span>
+    <span class="sep"></span>
+    <span class="meta-inline">
+      <label for="doc-version">Ver</label>
+      <input id="doc-version" type="text" value="{{ (initial_editor_document.version if initial_editor_document else '1.0') }}" title="Document version">
+    </span>
+    <span class="sep"></span>
+    <span class="meta-inline">
+      <label for="doc-date">Date</label>
+      <input id="doc-date" type="date" value="{{ initial_editor_document.doc_date if initial_editor_document else '' }}" title="Document date">
+    </span>
+    <span class="sep"></span>
+    <span class="meta-inline">
+      <label for="doc-expiry-days">Expiry Days</label>
+      <input id="doc-expiry-days" type="number" min="1" max="3650" value="{{ (initial_editor_document.expiry_days if initial_editor_document else 7) }}" title="Days until document expires">
+    </span>
+    <span class="sep"></span>
+    <span class="meta-inline">
+      <label for="doc-template-select">Template</label>
+      <select id="doc-template-select" title="Select document template">
+        <option value="">Choose template</option>
+        {% for tpl in document_templates %}
+        <option value="{{ tpl.id }}">{{ tpl.template_name }}</option>
+        {% endfor %}
+      </select>
+      <button id="btn-load-template" title="Load selected template into document">Load</button>
+    </span>
+    {% if opportunity_customer %}
+    <span class="sep"></span>
+    <span class="meta-inline">
+      <label for="opportunity-doc-select">Saved Docs</label>
+      <select id="opportunity-doc-select" title="Load saved opportunity document">
+        <option value="">Choose document</option>
+        {% for doc in opportunity_documents %}
+        <option value="{{ doc.id }}" {% if initial_editor_document and initial_editor_document.doc_id == doc.id %}selected{% endif %}>{{ doc.original_filename }}</option>
+        {% endfor %}
+      </select>
+    </span>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ── Format Bar ────────────────────────────────────────────────────── -->
+<div id="fbar">
+  <select id="f-heading" title="Style">
+    <option value="0">Paragraph</option>
+    <option value="1">Heading 1</option>
+    <option value="2">Heading 2</option>
+    <option value="3">Heading 3</option>
+    <option value="4">Heading 4</option>
+  </select>
+
+  <span class="fs"></span>
+
+  <select id="f-font" title="Font">
+    <option value="">Default</option>
+    <option value="Arial, sans-serif">Arial</option>
+    <option value="Georgia, serif">Georgia</option>
+    <option value="'Times New Roman', serif">Times New Roman</option>
+    <option value="'Courier New', monospace">Courier New</option>
+    <option value="Verdana, sans-serif">Verdana</option>
+  </select>
+  <select id="f-size" title="Size">
+    <option value="">Size</option>
+    <option value="8pt">8</option>
+    <option value="9pt">9</option>
+    <option value="10pt">10</option>
+    <option value="11pt">11</option>
+    <option value="12pt">12</option>
+    <option value="14pt">14</option>
+    <option value="16pt">16</option>
+    <option value="18pt">18</option>
+    <option value="24pt">24</option>
+    <option value="36pt">36</option>
+  </select>
+
+  <span class="fs"></span>
+
+  <button id="f-bold"       title="Bold (Ctrl+B)"><strong>B</strong></button>
+  <button id="f-italic"     title="Italic (Ctrl+I)"><em>I</em></button>
+  <button id="f-underline"  title="Underline (Ctrl+U)"><u>U</u></button>
+  <button id="f-strike"     title="Strikethrough"><s>S</s></button>
+  <button id="f-highlight"  title="Highlight" style="color:#fef08a;">&#9646;</button>
+
+  <span class="fs"></span>
+
+  <button id="f-al" title="Align Left">&#8676;</button>
+  <button id="f-ac" title="Align Center">&#8677;</button>
+  <button id="f-ar" title="Align Right">&#8677;</button>
+  <button id="f-aj" title="Justify">&#8801;</button>
+
+  <span class="fs"></span>
+
+  <button id="f-ul"         title="Bullet list">&#8226; List</button>
+  <button id="f-ol"         title="Numbered list">1. List</button>
+  <button id="f-quote"      title="Blockquote">&#10077;</button>
+  <button id="f-code"       title="Inline code">&lt;/&gt;</button>
+  <button id="f-codeblock"  title="Code block">&#9635;</button>
+  <button id="f-hr"         title="Horizontal rule">&#9472;</button>
+
+  <span class="fs"></span>
+
+  <button id="f-link"  title="Insert link">&#128279;</button>
+  <button id="f-img"   title="Insert image URL">&#128444;</button>
+  <button id="f-table" title="Insert table 3×3">&#9868;</button>
+
+  <span class="fs"></span>
+
+  <label style="font-size:.72rem;color:#d4f5e9;white-space:nowrap">Colour:</label>
+  <input id="f-color" type="color" value="#000000" title="Text colour">
+
+  <span class="fs"></span>
+
+  <button id="f-undo"  title="Undo (Ctrl+Z)">&#8617;</button>
+  <button id="f-redo"  title="Redo">&#8618;</button>
+  <button id="f-clear" title="Clear formatting">&#10006; Clear</button>
+</div>
+
+<!-- ── Page Canvas ───────────────────────────────────────────────────── -->
+<div id="canvas"></div>
+<button id="btn-add-page">+ Add Page</button>
+
+<!-- ── TipTap (single bundled ESM — all extensions share one core) ──── -->
+<script type="module">
+/*
+  Strategy: load everything from one esm.sh "bundle" URL.
+  Using ?bundle makes esm.sh inline all sub-deps so there is
+  exactly ONE copy of @tiptap/core on the page.
+*/
+import { Editor, Extension } from 'https://esm.sh/@tiptap/core@2.4.0?bundle';
+import StarterKit       from 'https://esm.sh/@tiptap/starter-kit@2.4.0?bundle';
+import Underline        from 'https://esm.sh/@tiptap/extension-underline@2.4.0?bundle';
+import TextAlign        from 'https://esm.sh/@tiptap/extension-text-align@2.4.0?bundle';
+import Highlight        from 'https://esm.sh/@tiptap/extension-highlight@2.4.0?bundle';
+import Link             from 'https://esm.sh/@tiptap/extension-link@2.4.0?bundle';
+import Image            from 'https://esm.sh/@tiptap/extension-image@2.4.0?bundle';
+import Table            from 'https://esm.sh/@tiptap/extension-table@2.4.0?bundle';
+import TableRow         from 'https://esm.sh/@tiptap/extension-table-row@2.4.0?bundle';
+import TableCell        from 'https://esm.sh/@tiptap/extension-table-cell@2.4.0?bundle';
+import TableHeader      from 'https://esm.sh/@tiptap/extension-table-header@2.4.0?bundle';
+import TextStyle        from 'https://esm.sh/@tiptap/extension-text-style@2.4.0?bundle';
+import Color            from 'https://esm.sh/@tiptap/extension-color@2.4.0?bundle';
+import FontFamily       from 'https://esm.sh/@tiptap/extension-font-family@2.4.0?bundle';
+
+// ── FontSize inline extension ────────────────────────────────────────────
+const FontSize = Extension.create({
+  name: 'fontSize',
+  addGlobalAttributes() {
+    return [{ types: ['textStyle'], attributes: {
+      fontSize: {
+        default: null,
+        parseHTML: el => el.style.fontSize || null,
+        renderHTML: attrs => attrs.fontSize ? { style: `font-size:${attrs.fontSize}` } : {},
+      }
+    }}];
+  },
+  addCommands() {
+    return {
+      setFontSize:   sz => ({ chain }) => chain().setMark('textStyle', { fontSize: sz }).run(),
+      unsetFontSize: ()  => ({ chain }) => chain().setMark('textStyle', { fontSize: null }).run(),
+    };
+  },
+});
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+const canvas   = document.getElementById('canvas');
+const overlay  = document.getElementById('loading-overlay');
+const errBnr   = document.getElementById('err-banner');
+const editors  = [];   // { editor, num }
+let   pageCount = 0;
+let   rebalanceQueued = false;
+let   isRebalancing = false;
+let   lastKnownEditorIndex = 0;
+let   currentOpportunityDocId = {{ (initial_editor_document.doc_id if initial_editor_document else None) | tojson }};
+const MIN_SPLIT_HEAD_CHARS = 90;
+const MIN_SPLIT_TAIL_CHARS = 120;
+const DOC_REF_API_URL = {{ url_for('crm.document_editor_ref_no') | tojson }};
+const DOC_TEMPLATE_URL_BASE = {{ url_for('crm.document_editor_template_load', template_id=0) | tojson }}.replace(/0$/, '');
+const DOC_STORAGE_KEY = 'ambifo_doc_v2';
+const DOC_REF_DRAFT_KEY = 'ambifo_doc_ref_draft';
+const DOC_REF_LOCK_KEY = 'ambifo_doc_ref_locked';
+const EDITOR_MODE = {{ ('opportunity' if opportunity_customer else 'standalone') | tojson }};
+const OPPORTUNITY_CUSTOMER_ID = {{ (opportunity_customer.id if opportunity_customer else None) | tojson }};
+const OPPORTUNITY_SAVE_URL = {{ (url_for('crm.opportunity_document_editor_save', customer_id=opportunity_customer.id) if opportunity_customer else '') | tojson }};
+const OPPORTUNITY_LOAD_URL_BASE = {{ (url_for('crm.opportunity_document_editor_load', customer_id=opportunity_customer.id, doc_id=0) if opportunity_customer else '') | tojson }}.replace(/0$/, '');
+const INITIAL_EDITOR_DOCUMENT = {{ initial_editor_document | tojson }};
+const BRAND = {
+  companyName:  {{ sow_brand_cfg.company_name | tojson }},
+  taglineChips: {{ sow_brand_cfg.tagline_chips | tojson }},
+  website:      {{ sow_brand_cfg.website | tojson }},
+  email:        {{ sow_brand_cfg.email | tojson }},
+  phone:        {{ sow_brand_cfg.phone | tojson }},
+  address:      {{ sow_brand_cfg.address | tojson }},
+  confidential: {{ sow_brand_cfg.confidential | tojson }},
+  logoUrl:      {{ brand_logo_url | tojson }},
+};
+
+function isOpportunityMode() {
+  return EDITOR_MODE === 'opportunity' && !!OPPORTUNITY_CUSTOMER_ID;
+}
+
+function renderTaglineChips(raw) {
+  return (raw || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(' | ');
+}
+
+function showErr(msg) {
+  errBnr.textContent = '⚠ ' + msg;
+  errBnr.style.display = 'block';
+  setTimeout(() => { errBnr.style.display = 'none'; }, 6000);
+}
+
+function todayStr() {
+  return new Date().toLocaleDateString('en-GB', { year:'numeric', month:'short', day:'2-digit' });
+}
+
+function todayIso() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+function formatDateForHeader(isoDate) {
+  if (!isoDate) return todayStr();
+  const parts = String(isoDate).split('-');
+  if (parts.length !== 3) return todayStr();
+  const [y, m, d] = parts;
+  const dt = new Date(Number(y), Number(m) - 1, Number(d));
+  if (Number.isNaN(dt.getTime())) return todayStr();
+  return dt.toLocaleDateString('en-GB', { year:'numeric', month:'short', day:'2-digit' });
+}
+
+function getTitle() { return document.getElementById('doc-title').value || 'Untitled Document'; }
+function getDocRefNo() { return document.getElementById('doc-ref-no').value || ''; }
+function getDocVersion() { return (document.getElementById('doc-version').value || '1.0').trim() || '1.0'; }
+function getDocDate() { return document.getElementById('doc-date').value || ''; }
+function getDocDateDisplay() { return formatDateForHeader(getDocDate()); }
+function getExpiryDays() { return parseInt(document.getElementById('doc-expiry-days').value, 10) || 7; }
+function calcExpiryDate() {
+  const base = getDocDate() || todayIso();
+  const dt = new Date(base);
+  if (Number.isNaN(dt.getTime())) return '—';
+  dt.setDate(dt.getDate() + getExpiryDays());
+  return dt.toLocaleDateString('en-GB', { year:'numeric', month:'short', day:'2-digit' });
+}
+function updateExpiryDisplay() {
+  document.querySelectorAll('.doc-expiry-mirror').forEach(el => { el.textContent = calcExpiryDate(); });
+}
+
+function isRefLocked() {
+  if (isOpportunityMode()) return !!currentOpportunityDocId;
+  return localStorage.getItem(DOC_REF_LOCK_KEY) === '1';
+}
+
+function setRefLocked(locked) {
+  if (!isOpportunityMode()) {
+    localStorage.setItem(DOC_REF_LOCK_KEY, locked ? '1' : '0');
+  }
+  const btn = document.getElementById('btn-regenerate-ref');
+  if (btn) {
+    btn.disabled = !!locked;
+    btn.style.opacity = locked ? '0.55' : '1';
+    btn.style.cursor = locked ? 'not-allowed' : 'pointer';
+    btn.title = locked ? 'Ref No is locked after first save' : 'Generate new reference number';
+  }
+}
+
+function yymmddNow() {
+  const d = new Date();
+  const yy = String(d.getFullYear()).slice(-2);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yy}${mm}${dd}`;
+}
+
+function fallbackLocalRefNo() {
+  const datePart = yymmddNow();
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `AMBIFO-${datePart}-${String(rand).padStart(4, '0')}`;
+}
+
+async function generateNextRefNo() {
+  try {
+    const resp = await fetch(DOC_REF_API_URL, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    if (!payload || !payload.ref_no) throw new Error('Missing ref_no');
+    return payload.ref_no;
+  } catch (err) {
+    showErr('Unable to fetch server ref no. Using fallback.');
+    return fallbackLocalRefNo();
+  }
+}
+
+async function ensureRefNo() {
+  const refEl = document.getElementById('doc-ref-no');
+  if (refEl.value.trim()) {
+    setRefLocked(isRefLocked());
+    return;
+  }
+
+  if (isOpportunityMode()) {
+    refEl.value = await generateNextRefNo();
+    setRefLocked(false);
+    return;
+  }
+
+  const rawSaved = localStorage.getItem(DOC_STORAGE_KEY);
+  if (rawSaved) {
+    try {
+      const saved = JSON.parse(rawSaved);
+      const savedRef = (saved && saved.refNo ? String(saved.refNo) : '').trim();
+      if (savedRef) {
+        refEl.value = savedRef;
+        localStorage.setItem(DOC_REF_DRAFT_KEY, savedRef);
+        setRefLocked(true);
+        return;
+      }
+    } catch (_e) {
+      // ignore malformed saved state
+    }
+  }
+
+  const draftRef = (localStorage.getItem(DOC_REF_DRAFT_KEY) || '').trim();
+  if (draftRef) {
+    refEl.value = draftRef;
+    setRefLocked(isRefLocked());
+    return;
+  }
+
+  refEl.value = await generateNextRefNo();
+  localStorage.setItem(DOC_REF_DRAFT_KEY, refEl.value);
+  setRefLocked(false);
+}
+
+function syncHeaderMetaMirrors() {
+  const title = getTitle();
+  const refNo = getDocRefNo();
+  const ver = getDocVersion();
+  const dateText = getDocDateDisplay();
+  const expiryText = calcExpiryDate();
+  document.querySelectorAll('.title-mirror').forEach(el => { el.textContent = title; });
+  document.querySelectorAll('.doc-ref-mirror').forEach(el => { el.textContent = refNo; });
+  document.querySelectorAll('.doc-version-mirror').forEach(el => { el.textContent = ver; });
+  document.querySelectorAll('.doc-date-mirror').forEach(el => { el.textContent = dateText; });
+  document.querySelectorAll('.doc-expiry-mirror').forEach(el => { el.textContent = expiryText; });
+}
+
+function escapeHtml(raw) {
+  return String(raw || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildFullHtmlDocument() {
+  // Capture exactly what print uses: the current rendered page DOM and current stylesheet.
+  rebalancePages();
+  removeTrailingEmptyPages();
+  refreshPageMeta();
+  syncHeaderMetaMirrors();
+
+  const title = getTitle();
+  const pagesHtml = Array.from(document.querySelectorAll('#canvas .a4-page'))
+    .map(page => page.outerHTML)
+    .join('\n');
+  const styleText = Array.from(document.querySelectorAll('head style'))
+    .map(styleEl => styleEl.textContent || '')
+    .join('\n\n');
+  const baseHref = `${window.location.origin}/`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="${escapeHtml(baseHref)}">
+  <title>${escapeHtml(title)}</title>
+  <style>${styleText}</style>
+  <style>
+    body { margin: 0; padding: 0; background: #fff; }
+    #canvas { padding: 0 !important; gap: 0 !important; }
+    .a4-page { margin: 0 auto !important; box-shadow: none !important; }
+    @media print {
+      body { margin: 0 !important; padding: 0 !important; }
+      #canvas { padding: 0 !important; gap: 0 !important; }
+      .a4-page { margin: 0 !important; box-shadow: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas">
+${pagesHtml}
+  </div>
+</body>
+</html>`;
+}
+
+// ── Build one TipTap editor ───────────────────────────────────────────────
+function makeEditor(el, content) {
+  const ed = new Editor({
+    element: el,
+    extensions: [
+      StarterKit,
+      Underline,
+      TextAlign.configure({ types: ['heading','paragraph'] }),
+      Highlight,
+      Link.configure({ openOnClick: false }),
+      Image,
+      Table.configure({ resizable: true }),
+      TableRow, TableCell, TableHeader,
+      TextStyle, Color, FontFamily, FontSize,
+    ],
+    content: content || '',
+    autofocus: editors.length === 0,
+    onTransaction: syncFbar,
+    onUpdate: () => {
+      if (!isRebalancing) queueRebalance();
+    },
+  });
+
+  ed.on('focus', () => {
+    const idx = editors.findIndex(entry => entry.editor === ed);
+    if (idx >= 0) lastKnownEditorIndex = idx;
+  });
+
+  return ed;
+}
+
+// ── Add a new A4 page ─────────────────────────────────────────────────────
+function addPage(html) {
+  const n = editors.length + 1;
+  pageCount = n;
+
+  const page = document.createElement('div');
+  page.className = 'a4-page';
+  page.dataset.page = n;
+  const chips = renderTaglineChips(BRAND.taglineChips);
+  page.innerHTML = `
+    <div class="pg-header">
+      <div class="brand-col">
+        <img class="brand-logo" src="${BRAND.logoUrl}" alt="Logo">
+        <div>
+          <div class="brand">${BRAND.companyName || 'AMBIFO TECHNOLOGY PVT LTD'}</div>
+          <div class="chips">${chips}</div>
+        </div>
+      </div>
+      <div class="meta">
+        <div class="meta-row"><span class="title-mirror">${getTitle()}</span></div>
+        <div class="meta-row"><strong>Ref:</strong> <span class="doc-ref-mirror">${getDocRefNo()}</span></div>
+        <div class="meta-row"><strong>Date:</strong> <span class="doc-date-mirror">${getDocDateDisplay()}</span> <strong>Ver:</strong> <span class="doc-version-mirror">${getDocVersion()}</span></div>
+        <div class="meta-row"><strong>Expiry:</strong> <span class="doc-expiry-mirror expiry-val">${calcExpiryDate()}</span></div>
+      </div>
+    </div>
+    <div class="pg-body" id="pg-body-${n}"></div>
+    <div class="pg-footer">
+      <div class="left">${BRAND.website || ''} | ${BRAND.email || ''} | ${BRAND.phone || ''}<br>${BRAND.address || ''}</div>
+      <div class="mid">${BRAND.confidential || ''}</div>
+      <div class="right pg-page-no">Page ${n}</div>
+    </div>
+  `;
+  canvas.appendChild(page);
+
+  const body = page.querySelector('.pg-body');
+  const ed   = makeEditor(body, html || '');
+  editors.push({ editor: ed, num: n, body, page });
+  refreshPageMeta();
+}
+
+function editorNodes(editor) {
+  const json = editor.getJSON() || {};
+  return Array.isArray(json.content) ? json.content.slice() : [];
+}
+
+function setEditorNodes(editor, nodes) {
+  const safeNodes = nodes && nodes.length ? nodes : [{ type: 'paragraph' }];
+  editor.commands.setContent({ type: 'doc', content: safeNodes }, false);
+}
+
+function isParagraphNodeEmpty(node) {
+  return !!node && node.type === 'paragraph' && (!node.content || node.content.length === 0);
+}
+
+function isEditorEffectivelyEmpty(editor) {
+  const nodes = editorNodes(editor);
+  return nodes.length === 0 || (nodes.length === 1 && isParagraphNodeEmpty(nodes[0]));
+}
+
+function ensurePage(index) {
+  while (editors.length <= index) addPage('');
+}
+
+function isPageOverflow(index) {
+  const entry = editors[index];
+  if (!entry) return false;
+
+  const pm = entry.body.querySelector('.ProseMirror');
+  if (!pm) return false;
+
+  return pm.scrollHeight > (pm.clientHeight + 1);
+}
+
+function paragraphCharCount(parts) {
+  if (!Array.isArray(parts)) return 0;
+  return parts.reduce((sum, part) => {
+    if (!part) return sum;
+    if (part.type === 'text' && typeof part.text === 'string') return sum + part.text.length;
+    if (part.type === 'hardBreak') return sum + 1;
+    return sum + 1;
+  }, 0);
+}
+
+function splitParagraphContent(parts, keepChars) {
+  if (!Array.isArray(parts)) return null;
+
+  let remaining = keepChars;
+  const left = [];
+  const right = [];
+
+  for (const part of parts) {
+    if (!part) continue;
+
+    if (part.type === 'text' && typeof part.text === 'string') {
+      if (remaining <= 0) {
+        right.push(part);
+      } else if (part.text.length <= remaining) {
+        left.push(part);
+        remaining -= part.text.length;
+      } else {
+        const splitAt = Math.max(1, Math.min(part.text.length - 1, remaining));
+        left.push({ ...part, text: part.text.slice(0, splitAt) });
+        right.push({ ...part, text: part.text.slice(splitAt) });
+        remaining = 0;
+      }
+      continue;
+    }
+
+    const unit = 1;
+    if (remaining > 0) {
+      left.push(part);
+      remaining -= unit;
+    } else {
+      right.push(part);
+    }
+  }
+
+  if (right[0] && right[0].type === 'text' && typeof right[0].text === 'string') {
+    right[0] = { ...right[0], text: right[0].text.replace(/^\s+/, '') };
+  }
+
+  if (!left.length || !right.length) return null;
+  return { left, right };
+}
+
+function findBestSplitByFit(index, curNodes, lastNode) {
+  const parts = Array.isArray(lastNode.content) ? lastNode.content : [];
+  const totalChars = paragraphCharCount(parts);
+  if (totalChars < 2) return null;
+
+  const baseNodes = curNodes.slice(0, -1);
+  const originalNodes = curNodes.slice();
+
+  let low = 1;
+  let high = totalChars - 1;
+  let bestSplit = null;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = splitParagraphContent(parts, mid);
+    if (!candidate) {
+      high = mid - 1;
+      continue;
+    }
+
+    const testNodes = baseNodes.concat([{ ...lastNode, content: candidate.left }]);
+    setEditorNodes(editors[index].editor, testNodes);
+
+    if (isPageOverflow(index)) {
+      high = mid - 1;
+    } else {
+      bestSplit = candidate;
+      low = mid + 1;
+    }
+  }
+
+  // Widow/orphan guard: avoid carrying only 1-2 visual lines to next page.
+  if (bestSplit) {
+    const headChars = paragraphCharCount(bestSplit.left);
+    const tailChars = paragraphCharCount(bestSplit.right);
+    if (tailChars < MIN_SPLIT_TAIL_CHARS && totalChars > (MIN_SPLIT_HEAD_CHARS + MIN_SPLIT_TAIL_CHARS)) {
+      const desiredKeep = Math.max(MIN_SPLIT_HEAD_CHARS, totalChars - MIN_SPLIT_TAIL_CHARS);
+      const balanced = splitParagraphContent(parts, desiredKeep);
+      if (balanced) {
+        // desiredKeep is <= max-fit keep, so it remains non-overflow on current page.
+        bestSplit = balanced;
+      }
+    } else if (headChars < MIN_SPLIT_HEAD_CHARS && totalChars > (MIN_SPLIT_HEAD_CHARS + MIN_SPLIT_TAIL_CHARS)) {
+      const desiredKeep = MIN_SPLIT_HEAD_CHARS;
+      const balanced = splitParagraphContent(parts, desiredKeep);
+      if (balanced) {
+        setEditorNodes(editors[index].editor, baseNodes.concat([{ ...lastNode, content: balanced.left }]));
+        const stillFits = !isPageOverflow(index);
+        setEditorNodes(editors[index].editor, originalNodes);
+        if (stillFits) bestSplit = balanced;
+      }
+    }
+  }
+
+  // Restore original content before final apply step.
+  setEditorNodes(editors[index].editor, originalNodes);
+  return bestSplit;
+}
+
+function splitLastParagraphForward(index) {
+  const cur = editors[index];
+  if (!cur) return false;
+
+  const curNodes = editorNodes(cur.editor);
+  if (!curNodes.length) return false;
+
+  const lastNode = curNodes[curNodes.length - 1];
+  if (!lastNode || lastNode.type !== 'paragraph' || !Array.isArray(lastNode.content)) return false;
+
+  const split = findBestSplitByFit(index, curNodes, lastNode);
+  if (!split) return false;
+
+  curNodes[curNodes.length - 1] = { ...lastNode, content: split.left };
+
+  ensurePage(index + 1);
+  const next = editors[index + 1];
+  const nextNodes = editorNodes(next.editor);
+  nextNodes.unshift({ type: 'paragraph', content: split.right });
+
+  setEditorNodes(cur.editor, curNodes);
+  setEditorNodes(next.editor, nextNodes);
+  return true;
+}
+
+function moveLastNodeForward(index) {
+  const cur = editors[index];
+  if (!cur) return false;
+
+  const curNodes = editorNodes(cur.editor);
+  if (splitLastParagraphForward(index)) return true;
+  if (curNodes.length <= 1) return false;
+
+  ensurePage(index + 1);
+  const next = editors[index + 1];
+  const moved = curNodes.pop();
+  const nextNodes = editorNodes(next.editor);
+  nextNodes.unshift(moved);
+
+  setEditorNodes(cur.editor, curNodes);
+  setEditorNodes(next.editor, nextNodes);
+  return true;
+}
+
+function moveFirstNodeBackward(index) {
+  if (index <= 0) return false;
+
+  const cur = editors[index];
+  const prev = editors[index - 1];
+  if (!cur || !prev) return false;
+
+  const curNodes = editorNodes(cur.editor);
+  if (!curNodes.length) return false;
+  if (curNodes.length === 1 && isParagraphNodeEmpty(curNodes[0])) return false;
+
+  const prevNodes = editorNodes(prev.editor);
+  const moved = curNodes.shift();
+  prevNodes.push(moved);
+
+  setEditorNodes(prev.editor, prevNodes);
+  setEditorNodes(cur.editor, curNodes);
+  return true;
+}
+
+function removeTrailingEmptyPages() {
+  while (editors.length > 1) {
+    const last = editors[editors.length - 1];
+    if (!isEditorEffectivelyEmpty(last.editor)) break;
+    last.editor.destroy();
+    last.page.remove();
+    editors.pop();
+  }
+}
+
+function refreshPageMeta() {
+  editors.forEach((entry, i) => {
+    entry.num = i + 1;
+    const footerPage = entry.page.querySelector('.pg-page-no');
+    if (footerPage) footerPage.textContent = `Page ${i + 1}`;
+  });
+  pageCount = editors.length;
+}
+
+function resetEditors() {
+  editors.forEach(({ editor }) => {
+    try { editor.destroy(); } catch (_e) {}
+  });
+  editors.length = 0;
+  pageCount = 0;
+  canvas.innerHTML = '';
+}
+
+function loadContentHtmlIntoDocument(htmlContent) {
+  resetEditors();
+  addPage((htmlContent || '').trim());
+  queueRebalance();
+  syncHeaderMetaMirrors();
+}
+
+function rebalancePages() {
+  if (isRebalancing) return;
+  isRebalancing = true;
+  const focusedBefore = editors.findIndex(({ editor }) => editor.isFocused);
+  const sourceIndex = focusedBefore >= 0 ? focusedBefore : lastKnownEditorIndex;
+  let focusTargetIndex = -1;
+
+  try {
+    for (let i = 0; i < editors.length; i++) {
+      let guard = 0;
+      while (isPageOverflow(i) && guard < 250) {
+        const moved = moveLastNodeForward(i);
+        if (!moved) break;
+        if (i === sourceIndex) {
+          focusTargetIndex = i + 1;
+        }
+        guard++;
+      }
+    }
+
+    removeTrailingEmptyPages();
+    refreshPageMeta();
+
+    // Keep typing flow natural: when overflow pushes content forward from the
+    // active page, move the caret to the next page.
+    if (focusTargetIndex >= 0) {
+      ensurePage(focusTargetIndex);
+      const target = editors[focusTargetIndex];
+      if (target && target.editor) {
+        target.page.scrollIntoView({ block: 'start', behavior: 'auto' });
+        target.editor.commands.focus('end');
+        lastKnownEditorIndex = focusTargetIndex;
+      }
+    }
+  } finally {
+    isRebalancing = false;
+  }
+}
+
+function queueRebalance() {
+  if (rebalanceQueued) return;
+  rebalanceQueued = true;
+  requestAnimationFrame(() => {
+    rebalanceQueued = false;
+    rebalancePages();
+  });
+}
+
+// ── Get the currently focused editor ─────────────────────────────────────
+function activeEd() {
+  for (let i = 0; i < editors.length; i++) {
+    const editor = editors[i].editor;
+    if (editor.isFocused) {
+      lastKnownEditorIndex = i;
+      return editor;
+    }
+  }
+  return editors.length ? editors[editors.length - 1].editor : null;
+}
+
+// ── Sync format-bar active states ─────────────────────────────────────────
+function syncFbar() {
+  const ed = activeEd();
+  if (!ed) return;
+  const tog = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', !!v);
+  };
+  tog('f-bold',      ed.isActive('bold'));
+  tog('f-italic',    ed.isActive('italic'));
+  tog('f-underline', ed.isActive('underline'));
+  tog('f-strike',    ed.isActive('strike'));
+  tog('f-highlight', ed.isActive('highlight'));
+  tog('f-ul',        ed.isActive('bulletList'));
+  tog('f-ol',        ed.isActive('orderedList'));
+  tog('f-quote',     ed.isActive('blockquote'));
+  tog('f-code',      ed.isActive('code'));
+  tog('f-al', ed.isActive({ textAlign:'left' }));
+  tog('f-ac', ed.isActive({ textAlign:'center' }));
+  tog('f-ar', ed.isActive({ textAlign:'right' }));
+  tog('f-aj', ed.isActive({ textAlign:'justify' }));
+  const sel = document.getElementById('f-heading');
+  for (let i=1;i<=4;i++) { if (ed.isActive('heading',{level:i})) { sel.value=String(i); return; } }
+  sel.value = '0';
+}
+
+// ── Bind format bar buttons (mousedown keeps editor focus) ────────────────
+function fb(id, fn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('mousedown', ev => {
+    ev.preventDefault();
+    const ed = activeEd(); if (ed) fn(ed);
+  });
+}
+
+fb('f-bold',      e => e.chain().focus().toggleBold().run());
+fb('f-italic',    e => e.chain().focus().toggleItalic().run());
+fb('f-underline', e => e.chain().focus().toggleUnderline().run());
+fb('f-strike',    e => e.chain().focus().toggleStrike().run());
+fb('f-highlight', e => e.chain().focus().toggleHighlight().run());
+fb('f-ul',        e => e.chain().focus().toggleBulletList().run());
+fb('f-ol',        e => e.chain().focus().toggleOrderedList().run());
+fb('f-quote',     e => e.chain().focus().toggleBlockquote().run());
+fb('f-code',      e => e.chain().focus().toggleCode().run());
+fb('f-codeblock', e => e.chain().focus().toggleCodeBlock().run());
+fb('f-hr',        e => e.chain().focus().setHorizontalRule().run());
+fb('f-undo',      e => e.chain().focus().undo().run());
+fb('f-redo',      e => e.chain().focus().redo().run());
+fb('f-clear',     e => e.chain().focus().clearNodes().unsetAllMarks().run());
+fb('f-al', e => e.chain().focus().setTextAlign('left').run());
+fb('f-ac', e => e.chain().focus().setTextAlign('center').run());
+fb('f-ar', e => e.chain().focus().setTextAlign('right').run());
+fb('f-aj', e => e.chain().focus().setTextAlign('justify').run());
+
+fb('f-link', e => {
+  const u = window.prompt('Enter URL:', 'https://');
+  if (u) e.chain().focus().setLink({ href: u }).run();
+});
+fb('f-img', e => {
+  const u = window.prompt('Enter image URL:', 'https://');
+  if (u) e.chain().focus().setImage({ src: u }).run();
+});
+fb('f-table', e => e.chain().focus().insertTable({ rows:3, cols:3, withHeaderRow:true }).run());
+
+document.getElementById('f-heading').addEventListener('change', function() {
+  const ed = activeEd(); if (!ed) return;
+  const v = parseInt(this.value);
+  v === 0 ? ed.chain().focus().setParagraph().run()
+           : ed.chain().focus().setHeading({ level: v }).run();
+});
+document.getElementById('f-font').addEventListener('change', function() {
+  const ed = activeEd(); if (!ed) return;
+  this.value ? ed.chain().focus().setFontFamily(this.value).run()
+             : ed.chain().focus().unsetFontFamily().run();
+});
+document.getElementById('f-size').addEventListener('change', function() {
+  const ed = activeEd(); if (!ed) return;
+  this.value ? ed.chain().focus().setFontSize(this.value).run()
+             : ed.chain().focus().unsetFontSize().run();
+});
+document.getElementById('f-color').addEventListener('input', function() {
+  const ed = activeEd(); if (!ed) return;
+  ed.chain().focus().setColor(this.value).run();
+});
+
+// ── Add page button ───────────────────────────────────────────────────────
+document.getElementById('btn-add-page').addEventListener('click', () => addPage());
+
+// ── Title mirror ──────────────────────────────────────────────────────────
+document.getElementById('doc-title').addEventListener('input', function() {
+  syncHeaderMetaMirrors();
+});
+
+document.getElementById('doc-version').addEventListener('input', function() {
+  syncHeaderMetaMirrors();
+});
+
+document.getElementById('doc-date').addEventListener('input', function() {
+  syncHeaderMetaMirrors();
+  updateExpiryDisplay();
+});
+
+document.getElementById('doc-expiry-days').addEventListener('input', function() {
+  updateExpiryDisplay();
+});
+
+document.getElementById('btn-regenerate-ref').addEventListener('click', async function() {
+  if (isRefLocked()) {
+    showErr('Ref No is locked after first save.');
+    return;
+  }
+  document.getElementById('doc-ref-no').value = await generateNextRefNo();
+  localStorage.setItem(DOC_REF_DRAFT_KEY, getDocRefNo());
+  syncHeaderMetaMirrors();
+});
+
+document.getElementById('btn-load-template').addEventListener('click', async function() {
+  const selectEl = document.getElementById('doc-template-select');
+  const templateId = (selectEl.value || '').trim();
+  if (!templateId) {
+    showErr('Please select a template first.');
+    return;
+  }
+
+  try {
+    const url = isOpportunityMode()
+      ? `${DOC_TEMPLATE_URL_BASE}${templateId}?customer_id=${encodeURIComponent(String(OPPORTUNITY_CUSTOMER_ID))}`
+      : `${DOC_TEMPLATE_URL_BASE}${templateId}`;
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    loadContentHtmlIntoDocument(payload.content_html || '');
+  } catch (err) {
+    showErr('Failed to load template.');
+  }
+});
+
+// ── Save / Load (localStorage) ────────────────────────────────────────────
+async function saveDoc() {
+  await ensureRefNo();
+  const fullHtml = buildFullHtmlDocument();
+  const data = {
+    title: getTitle(),
+    refNo: getDocRefNo(),
+    version: getDocVersion(),
+    docDate: getDocDate(),
+    expiryDays: getExpiryDays(),
+    pages: editors.map(({ editor }) => editor.getHTML()),
+    contentHtml: editors.map(({ editor }) => editor.getHTML()).join('\n'),
+    fullHtml,
+    ts: Date.now(),
+  };
+
+  if (isOpportunityMode()) {
+    const payload = {
+      doc_id: currentOpportunityDocId,
+      title: data.title,
+      ref_no: data.refNo,
+      version: data.version,
+      doc_date: data.docDate,
+      expiry_days: data.expiryDays,
+      content_html: data.contentHtml,
+      full_html: data.fullHtml,
+    };
+    const resp = await fetch(OPPORTUNITY_SAVE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) {
+      showErr(result.message || 'Save failed.');
+      return;
+    }
+    currentOpportunityDocId = result.doc_id;
+    setRefLocked(true);
+
+    const select = document.getElementById('opportunity-doc-select');
+    if (select) {
+      const idStr = String(result.doc_id);
+      let opt = Array.from(select.options).find(o => o.value === idStr);
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.value = idStr;
+        select.appendChild(opt);
+      }
+      opt.textContent = result.filename || `${data.title}.html`;
+      select.value = idStr;
+    }
+  } else {
+    localStorage.setItem(DOC_STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(DOC_REF_DRAFT_KEY, data.refNo || '');
+    setRefLocked(true);
+  }
+
+  const s = document.getElementById('save-status');
+  s.textContent = '✓ Saved ' + new Date().toLocaleTimeString();
+  setTimeout(() => s.textContent = '', 4000);
+}
+
+function applyLoadedDocument(data) {
+  document.getElementById('doc-title').value = data.title || 'Untitled Document';
+  document.getElementById('doc-ref-no').value = data.ref_no || data.refNo || '';
+  document.getElementById('doc-version').value = data.version || '1.0';
+  document.getElementById('doc-date').value = data.doc_date || data.docDate || todayIso();
+  document.getElementById('doc-expiry-days').value = data.expiry_days || data.expiryDays || 7;
+  updateExpiryDisplay();
+  syncHeaderMetaMirrors();
+
+  const htmlContent = data.content_html || data.contentHtml || '';
+  loadContentHtmlIntoDocument(htmlContent);
+}
+
+async function loadDoc() {
+  if (isOpportunityMode()) {
+    const select = document.getElementById('opportunity-doc-select');
+    const selectedValue = (select && select.value) ? select.value : '';
+    const targetId = selectedValue || (currentOpportunityDocId ? String(currentOpportunityDocId) : '');
+    if (!targetId) {
+      showErr('Choose a saved document first.');
+      return;
+    }
+
+    const resp = await fetch(`${OPPORTUNITY_LOAD_URL_BASE}${targetId}`, {
+      method: 'GET',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success || !result.document) {
+      showErr(result.message || 'Failed to load document.');
+      return;
+    }
+
+    currentOpportunityDocId = result.document.doc_id;
+    applyLoadedDocument(result.document);
+    setRefLocked(true);
+    if (select) select.value = String(currentOpportunityDocId);
+    return;
+  }
+
+  const raw = localStorage.getItem(DOC_STORAGE_KEY);
+  if (!raw) { showErr('No saved document found.'); return; }
+  try {
+    const data = JSON.parse(raw);
+    document.getElementById('doc-title').value = data.title || '';
+    document.getElementById('doc-ref-no').value = data.refNo || '';
+    document.getElementById('doc-version').value = data.version || '1.0';
+    document.getElementById('doc-date').value = data.docDate || todayIso();
+    document.getElementById('doc-expiry-days').value = data.expiryDays || 7;
+    updateExpiryDisplay();
+    await ensureRefNo();
+    if (getDocRefNo()) {
+      localStorage.setItem(DOC_REF_DRAFT_KEY, getDocRefNo());
+      setRefLocked(true);
+    }
+    canvas.innerHTML = '';
+    editors.length = 0;
+    pageCount = 0;
+    (data.pages || ['']).forEach(h => addPage(h));
+    queueRebalance();
+    syncHeaderMetaMirrors();
+  } catch(e) { showErr('Load failed: ' + e.message); }
+}
+document.getElementById('btn-save').addEventListener('click', () => { void saveDoc(); });
+document.getElementById('btn-load').addEventListener('click', () => { void loadDoc(); });
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); void saveDoc(); }
+});
+
+// ── Export HTML ───────────────────────────────────────────────────────────
+document.getElementById('btn-html').addEventListener('click', () => {
+  const title = getTitle();
+  const html = buildFullHtmlDocument();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([html], {type:'text/html'}));
+  a.download = title.replace(/\s+/g,'-') + '.html';
+  a.click(); URL.revokeObjectURL(a.href);
+});
+
+// ── Print / PDF (loads Paged.js dynamically — safe, DOM already built) ────
+document.getElementById('btn-pdf').addEventListener('click', () => {
+  // Ensure editor pagination state is normalized before print rendering.
+  rebalancePages();
+  removeTrailingEmptyPages();
+  refreshPageMeta();
+  window.print();
+});
+
+// ── Init: first page, hide loader ─────────────────────────────────────────
+async function initDocumentEditor() {
+  if (!document.getElementById('doc-date').value) {
+    document.getElementById('doc-date').value = todayIso();
+  }
+  updateExpiryDisplay();
+  await ensureRefNo();
+
+  if (INITIAL_EDITOR_DOCUMENT && INITIAL_EDITOR_DOCUMENT.content_html) {
+    applyLoadedDocument(INITIAL_EDITOR_DOCUMENT);
+    currentOpportunityDocId = INITIAL_EDITOR_DOCUMENT.doc_id || currentOpportunityDocId;
+    setRefLocked(isRefLocked());
+  } else {
+    addPage();
+    queueRebalance();
+    syncHeaderMetaMirrors();
+  }
+
+  overlay.classList.add('hidden');
+}
+
+void initDocumentEditor();
+
+// Expose for devtools
+window._editors = editors;
+</script>
+
+</body>
+</html>

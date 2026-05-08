@@ -18,6 +18,141 @@
   .config-left.single-section-mode .mobile-collapsible.expanded {
     display: block;
   }
+
+  .admin-grid-wrap {
+    margin-top: 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .admin-grid {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .admin-grid th,
+  .admin-grid td {
+    padding: 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  .admin-grid th {
+    background: #f8fafc;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #475569;
+  }
+
+  .admin-actions {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .mini-icon-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #0f172a;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mini-icon-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+  }
+
+  .mini-icon-btn.danger {
+    color: #991b1b;
+    border-color: #fecaca;
+    background: #fff5f5;
+  }
+
+  .mini-icon-btn.danger:hover {
+    background: #fee2e2;
+  }
+
+  .admin-pagination {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+
+  .admin-pagination .btn {
+    padding: 4px 10px;
+    min-height: auto;
+  }
+
+  .admin-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 9998;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 14px;
+  }
+
+  .admin-modal-backdrop.open {
+    display: flex;
+  }
+
+  .admin-modal {
+    width: min(680px, 100%);
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.35);
+    padding: 14px;
+  }
+
+  .admin-modal h4 {
+    margin: 0 0 8px;
+  }
+
+  .admin-modal .hint {
+    margin-bottom: 10px;
+  }
+
+  .admin-modal-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .admin-tag-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+    max-height: 220px;
+    overflow: auto;
+  }
+
+  .admin-tag-grid .checkbox-row {
+    margin: 0;
+    white-space: nowrap;
+  }
 </style>
 <section class="panel">
   <h2>Configuration</h2>
@@ -88,6 +223,68 @@
         </form>
       </section>
 
+      <section class="panel config-card mobile-collapsible" id="document-storage-config">
+        <h3>Document Media Storage</h3>
+        <p class="hint">Choose active storage provider for uploaded documents. Default active provider is Local.</p>
+        <form method="post" class="grid-form" id="document-storage-form">
+          <input type="hidden" name="action" value="save_document_storage">
+
+          <label>Active Provider
+            <select name="document_storage_backend" id="document_storage_backend" required>
+              <option value="local" {% if document_storage.backend == 'local' %}selected{% endif %}>Local</option>
+              <option value="aws" {% if document_storage.backend == 'aws' %}selected{% endif %}>AWS S3</option>
+              <option value="azure" {% if document_storage.backend == 'azure' %}selected{% endif %}>Azure Blob</option>
+              <option value="gcp" {% if document_storage.backend == 'gcp' %}selected{% endif %}>GCP Cloud Storage</option>
+            </select>
+          </label>
+
+          <label class="full">Local Folder Path
+            <input name="documents_folder" value="{{ document_storage.documents_folder }}" placeholder="documents">
+          </label>
+
+          <div class="full" data-storage-provider="aws" style="border:1px solid var(--line);border-radius:8px;padding:10px;">
+            <h4 style="margin-bottom:8px;">AWS S3 Credentials</h4>
+            <div class="grid-form" style="margin-top:0;">
+              <label>AWS Access Key ID<input name="aws_access_key_id" value="{{ document_storage.aws_access_key_id }}"></label>
+              <label>AWS Secret Access Key<input type="password" name="aws_secret_access_key" value="{{ document_storage.aws_secret_access_key }}"></label>
+              <label>AWS Bucket Name<input name="aws_bucket_name" value="{{ document_storage.aws_bucket_name }}"></label>
+              <label>AWS Region<input name="aws_region" value="{{ document_storage.aws_region }}" placeholder="us-east-1"></label>
+            </div>
+          </div>
+
+          <div class="full" data-storage-provider="azure" style="border:1px solid var(--line);border-radius:8px;padding:10px;">
+            <h4 style="margin-bottom:8px;">Azure Blob Credentials</h4>
+            <div class="grid-form" style="margin-top:0;">
+              <label class="full">Azure Connection String<input name="azure_connection_string" value="{{ document_storage.azure_connection_string }}"></label>
+              <label>Azure Container Name<input name="azure_container_name" value="{{ document_storage.azure_container_name }}" placeholder="ambifo-documents"></label>
+            </div>
+          </div>
+
+          <div class="full" data-storage-provider="gcp" style="border:1px solid var(--line);border-radius:8px;padding:10px;">
+            <h4 style="margin-bottom:8px;">GCP Cloud Storage Credentials</h4>
+            <div class="grid-form" style="margin-top:0;">
+              <label>GCP Project ID<input name="gcp_project_id" value="{{ document_storage.gcp_project_id }}"></label>
+              <label>GCP Bucket Name<input name="gcp_bucket_name" value="{{ document_storage.gcp_bucket_name }}"></label>
+              <label class="full">GCP Credentials JSON (service-account JSON)
+                <textarea name="gcp_credentials_json" rows="5" placeholder='{"type":"service_account", ...}'>{{ document_storage.gcp_credentials_json }}</textarea>
+              </label>
+            </div>
+          </div>
+
+          <button class="btn" type="submit">Update Document Storage</button>
+        </form>
+
+        <form method="post" style="margin-top:10px;" onsubmit="return confirm('Sync all locally stored documents to the currently active cloud provider?');">
+          <input type="hidden" name="action" value="sync_local_documents_to_active_cloud">
+          <button class="btn" type="submit">Sync Local Documents To Active Cloud</button>
+        </form>
+
+        <form method="post" style="margin-top:10px;" onsubmit="return confirm('Sync all documents from the currently active cloud provider back to local storage?');">
+          <input type="hidden" name="action" value="sync_active_cloud_documents_to_local">
+          <button class="btn" type="submit">Sync Active Cloud Documents To Local</button>
+        </form>
+      </section>
+
       <section class="panel config-card mobile-collapsible" id="ai-config">
         <h3>AI Settings</h3>
         <p class="hint">Used by AI generation buttons for email templates, document content, and architecture diagrams. Only one provider is active at a time.</p>
@@ -143,6 +340,7 @@
           <p class="hint full">Prompts are Ambifo-specific by default for all generation actions.</p>
           <button class="btn" type="submit">Update AI Settings</button>
         </form>
+
       </section>
 
       <section class="panel config-card mobile-collapsible" id="sow-master-config">
@@ -181,6 +379,150 @@
         {% if selected_sow_template %}
           <a class="btn" href="{{ url_for('crm.configuration_sow_template_sections', template_id=selected_sow_template.id) }}">Open Section Manager</a>
         {% endif %}
+
+        <hr style="margin:22px 0;border:none;border-top:1px solid var(--line);">
+        <h4 style="margin-bottom:6px;">Document Header &amp; Footer — Brand Master</h4>
+        <p class="hint" style="margin-bottom:12px;">These values auto-fill the header and footer on every SOW/document page. Change them here once and all documents will pick them up.</p>
+        <form method="post" class="grid-form">
+          <input type="hidden" name="action" value="save_sow_brand_config">
+          <label>Company Name
+            <input name="sow_company_name" value="{{ sow_brand_cfg.company_name }}" placeholder="AMBIFO TECHNOLOGY PVT LTD">
+          </label>
+          <label>Tagline / Capability Chips <span class="hint">(comma-separated)</span>
+            <input name="sow_tagline_chips" value="{{ sow_brand_cfg.tagline_chips }}" placeholder="Cloud Strategy,Migration,DevOps,AI/ML">
+          </label>
+          <label>Website
+            <input name="sow_website" value="{{ sow_brand_cfg.website }}" placeholder="www.ambifo.com">
+          </label>
+          <label>Support Email
+            <input name="sow_email" value="{{ sow_brand_cfg.email }}" placeholder="support@ambifo.com">
+          </label>
+          <label>Phone
+            <input name="sow_phone" value="{{ sow_brand_cfg.phone }}" placeholder="+91 9148419502">
+          </label>
+          <label>Header Top Space (px)
+            <input name="sow_header_top_px" type="number" min="0" max="300" step="1" value="{{ sow_brand_cfg.header_top_px }}" placeholder="122">
+          </label>
+          <label>Footer Bottom Space (px)
+            <input name="sow_footer_bottom_px" type="number" min="0" max="300" step="1" value="{{ sow_brand_cfg.footer_bottom_px }}" placeholder="80">
+          </label>
+          <label class="full">Address
+            <input name="sow_address" value="{{ sow_brand_cfg.address }}" placeholder="Building No 674, 18th Main...">
+          </label>
+          <label class="full">Confidential Notice <span class="hint">(shown in footer middle)</span>
+            <input name="sow_confidential" value="{{ sow_brand_cfg.confidential }}" placeholder="⚠ CONFIDENTIAL — Intended solely for the named addressee">
+          </label>
+          <div class="full">
+            <button class="btn" type="submit">Save Header / Footer Settings</button>
+            <button type="button" class="btn" style="margin-left:8px;" onclick="toggleBrandPreview()">👁 Preview Header &amp; Footer</button>
+          </div>
+        </form>
+
+        <!-- Live preview -->
+        <div id="brandPreviewWrap" style="display:none;margin-top:18px;">
+          <hr style="border:none;border-top:1px solid var(--line);margin-bottom:14px;">
+          <h5 style="margin-bottom:8px;color:var(--muted);">Live Preview</h5>
+
+          <!-- HEADER PREVIEW -->
+          <div id="prevHeader" style="
+            display:flex;justify-content:space-between;align-items:center;
+            padding:8px 16px;border:2px solid #0f4fa8;border-radius:6px 6px 0 0;
+            background:#fff;font-family:inherit;gap:12px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <img id="pvLogo" src="/static/ambifologo.png" alt="logo"
+                   style="height:40px;width:auto;object-fit:contain;"
+                   onerror="this.style.display='none'">
+              <div style="font-weight:700;font-size:13px;color:#0f4fa8;line-height:1.2;" id="pvCompanyName"></div>
+              <div id="pvChips" style="display:flex;flex-wrap:wrap;gap:4px;"></div>
+            </div>
+            <div style="text-align:right;font-size:11px;color:#444;line-height:1.6;">
+              <div style="font-weight:600;font-size:12px;" id="pvDocType">Statement of Work</div>
+              <div id="pvMeta" style="color:#666;"></div>
+            </div>
+          </div>
+
+          <!-- PAGE BODY HINT -->
+          <div style="
+            height:60px;border-left:2px solid #0f4fa8;border-right:2px solid #0f4fa8;
+            background:repeating-linear-gradient(180deg,#f9f9f9 0px,#f9f9f9 14px,#eee 14px,#eee 15px);
+            display:flex;align-items:center;justify-content:center;
+            font-size:11px;color:#aaa;letter-spacing:1px;">Document Content Area</div>
+
+          <!-- FOOTER PREVIEW -->
+          <div id="prevFooter" style="
+            display:flex;justify-content:space-between;align-items:center;
+            padding:6px 16px;border:2px solid #0f4fa8;border-radius:0 0 6px 6px;border-top:1px dashed #0f4fa8;
+            background:#f7f9fc;font-size:10.5px;color:#333;gap:8px;">
+            <div style="flex:2;" id="pvLeft"></div>
+            <div style="flex:2;text-align:center;font-size:10px;color:#b45309;font-weight:600;" id="pvConfidential"></div>
+            <div style="flex:1;text-align:right;line-height:1.5;" id="pvRight">v1.0<br>Page 1</div>
+          </div>
+        </div>
+
+        <script>
+        (function(){
+          var form = document.querySelector('form[action=""] input[name="action"][value="save_sow_brand_config"]')
+                   ?.closest('form')
+                   || [...document.querySelectorAll('form')].find(f=>f.querySelector('input[name="action"][value="save_sow_brand_config"]'));
+
+          function q(name){ return form?.querySelector('[name="'+name+'"]') || document.querySelector('[name="'+name+'"]'); }
+
+          var inputs = {
+            company:     q('sow_company_name'),
+            chips:       q('sow_tagline_chips'),
+            website:     q('sow_website'),
+            email:       q('sow_email'),
+            phone:       q('sow_phone'),
+            address:     q('sow_address'),
+            confidential:q('sow_confidential'),
+          };
+
+          function refreshPreview(){
+            var company     = inputs.company?.value     || '';
+            var chips       = inputs.chips?.value       || '';
+            var website     = inputs.website?.value     || '';
+            var email       = inputs.email?.value       || '';
+            var phone       = inputs.phone?.value       || '';
+            var address     = inputs.address?.value     || '';
+            var confidential= inputs.confidential?.value|| '';
+
+            // Header
+            document.getElementById('pvCompanyName').textContent = company;
+            var chipWrap = document.getElementById('pvChips');
+            chipWrap.innerHTML = '';
+            chips.split(',').forEach(function(c){ c = c.trim(); if(!c) return;
+              var s = document.createElement('span');
+              s.textContent = c;
+              s.style.cssText='background:#e8f0fe;color:#0f4fa8;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:600;';
+              chipWrap.appendChild(s);
+            });
+            document.getElementById('pvMeta').textContent = 'Ref: DOC-REF | Date: '+(new Date().toLocaleDateString('en-GB'))+' | Ver: v1.0';
+
+            // Footer
+            document.getElementById('pvLeft').innerHTML =
+              '<strong>'+company+'</strong><br>'+
+              (website?website:'')+(email?' | '+email:'')+(phone?' | '+phone:'')+'<br>'+address;
+            document.getElementById('pvConfidential').textContent = confidential;
+          }
+
+          Object.values(inputs).forEach(function(inp){
+            if(inp) inp.addEventListener('input', refreshPreview);
+          });
+
+          window.toggleBrandPreview = function(){
+            var wrap = document.getElementById('brandPreviewWrap');
+            if(wrap.style.display === 'none'){
+              wrap.style.display = 'block';
+              refreshPreview();
+              wrap.scrollIntoView({behavior:'smooth',block:'nearest'});
+            } else {
+              wrap.style.display = 'none';
+            }
+          };
+
+          refreshPreview();
+        })();
+        </script>
       </section>
 
       <section class="panel config-card mobile-collapsible" id="email-template-config">
@@ -431,15 +773,128 @@
           <button class="btn" type="submit">Add Admin</button>
         </form>
 
-        <div class="status-list">
-          {% for user in admin_users %}
-            <div class="status-item">
-              <span>{{ user.username }}{% if user.email %} ({{ user.email }}){% endif %}</span>
+        <form method="post" class="inline-form" style="margin-top:10px;" onsubmit="return confirm('Reset password for all admin users?');">
+          <input type="hidden" name="action" value="reset_all_admin_passwords">
+          <input type="password" name="admin_reset_password" placeholder="New password for all admins" minlength="6" required>
+          <button class="btn" type="submit">Reset Password For All Admins</button>
+        </form>
+
+        {% if admin_users %}
+          <div class="admin-grid-wrap">
+            <table class="admin-grid" id="adminUsersGrid">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Email</th>
+                  <th>Notification</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for user in admin_users %}
+                  {% set pref = admin_history_notification_subscriptions.get(user.id, {'enabled': False, 'tags': []}) %}
+                  <tr data-admin-row="1">
+                    <td>{{ user.username }}</td>
+                    <td>{{ user.email or 'No email configured' }}</td>
+                    <td>
+                      {% if pref.enabled %}
+                        <span class="status-badge" style="background:#dcfce7;color:#166534;">Enabled</span>
+                      {% else %}
+                        <span class="status-badge" style="background:#e2e8f0;color:#334155;">Disabled</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <div class="admin-actions">
+                        <button
+                          type="button"
+                          class="mini-icon-btn"
+                          title="Notification"
+                          data-open-notification-modal="1"
+                          data-user-id="{{ user.id }}"
+                          data-username="{{ user.username }}"
+                          data-user-email="{{ user.email or '' }}"
+                          data-enabled="{{ 1 if pref.enabled else 0 }}"
+                          data-tags="{{ pref.tags|join(',') }}"
+                        >N</button>
+
+                        <button
+                          type="button"
+                          class="mini-icon-btn"
+                          title="Reset Password"
+                          data-open-password-modal="1"
+                          data-user-id="{{ user.id }}"
+                          data-username="{{ user.username }}"
+                        >P</button>
+
+                        <form method="post" onsubmit="return confirmDeleteAdminUser('{{ user.username|e }}');" style="display:inline;">
+                          <input type="hidden" name="action" value="delete_admin_user">
+                          <input type="hidden" name="delete_user_id" value="{{ user.id }}">
+                          <button type="submit" class="mini-icon-btn danger" title="Delete Admin">D</button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+
+            <div class="admin-pagination">
+              <button type="button" class="btn btn-secondary" id="adminUsersPrevPage">Prev</button>
+              <span id="adminUsersPageInfo" class="hint">Page 1</span>
+              <button type="button" class="btn btn-secondary" id="adminUsersNextPage">Next</button>
             </div>
-          {% else %}
-            <p>No admin users yet.</p>
-          {% endfor %}
-        </div>
+          </div>
+
+          <div class="admin-modal-backdrop" id="adminNotifyModalBackdrop" aria-hidden="true">
+            <div class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="adminNotifyModalTitle">
+              <h4 id="adminNotifyModalTitle">Admin Notification Settings</h4>
+              <p class="hint" id="adminNotifyModalHint"></p>
+              <form method="post" id="adminNotifyForm">
+                <input type="hidden" name="action" value="save_admin_notification_subscription">
+                <input type="hidden" name="notification_user_id" id="modalNotificationUserId">
+
+                <label class="checkbox-row" style="margin-bottom:10px;">
+                  <input type="checkbox" name="notification_enabled" value="1" id="modalNotificationEnabled">
+                  Enable Email Notifications
+                </label>
+
+                <div class="admin-tag-grid">
+                  {% for tag_name in notification_tag_names %}
+                    <label class="checkbox-row">
+                      <input type="checkbox" name="notification_tags" value="{{ tag_name }}" data-modal-notify-tag="{{ tag_name }}">
+                      {{ tag_name }}
+                    </label>
+                  {% endfor %}
+                </div>
+
+                <div class="admin-modal-actions">
+                  <button type="button" class="btn btn-secondary" data-close-modal="adminNotifyModalBackdrop">Cancel</button>
+                  <button type="submit" class="btn">Save Notification Settings</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="admin-modal-backdrop" id="adminPasswordModalBackdrop" aria-hidden="true">
+            <div class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="adminPasswordModalTitle">
+              <h4 id="adminPasswordModalTitle">Reset Admin Password</h4>
+              <p class="hint" id="adminPasswordModalHint"></p>
+              <form method="post" id="adminPasswordForm">
+                <input type="hidden" name="action" value="reset_admin_password">
+                <input type="hidden" name="reset_user_id" id="modalResetUserId">
+                <label>New Password
+                  <input type="password" name="reset_user_password" minlength="6" required placeholder="Minimum 6 characters">
+                </label>
+                <div class="admin-modal-actions">
+                  <button type="button" class="btn btn-secondary" data-close-modal="adminPasswordModalBackdrop">Cancel</button>
+                  <button type="submit" class="btn">Reset Password</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        {% else %}
+          <p>No admin users yet.</p>
+        {% endif %}
       </section>
 
       <section class="panel config-card mobile-collapsible" id="restart-config">
@@ -457,6 +912,7 @@
       <div class="config-links">
         <a href="#smtp-config">SMTP Configuration</a>
         <a href="#teams-config">Teams Configuration</a>
+        <a href="#document-storage-config">Document Media Storage</a>
         <a href="#meeting-config">Meeting Availability</a>
         <a href="#app-config">Application URL</a>
         <a href="#ai-config">AI Settings</a>
@@ -561,7 +1017,136 @@ document.addEventListener('DOMContentLoaded', function() {
     syncAiProviderFields();
   }
 
+  var storageProviderSelect = document.getElementById('document_storage_backend');
+  function syncStorageProviderFields() {
+    if (!storageProviderSelect) return;
+    var selectedProvider = (storageProviderSelect.value || 'local').toLowerCase();
+    document.querySelectorAll('[data-storage-provider]').forEach(function(block) {
+      block.style.display = block.getAttribute('data-storage-provider') === selectedProvider ? 'block' : 'none';
+    });
+  }
+
+  if (storageProviderSelect) {
+    storageProviderSelect.addEventListener('change', syncStorageProviderFields);
+    syncStorageProviderFields();
+  }
+
+  var adminRows = Array.from(document.querySelectorAll('#adminUsersGrid tbody tr[data-admin-row]'));
+  var adminPrevBtn = document.getElementById('adminUsersPrevPage');
+  var adminNextBtn = document.getElementById('adminUsersNextPage');
+  var adminPageInfo = document.getElementById('adminUsersPageInfo');
+  var adminPerPage = 6;
+  var adminCurrentPage = 1;
+
+  function renderAdminUsersPage() {
+    if (!adminRows.length || !adminPageInfo) return;
+    var totalPages = Math.max(1, Math.ceil(adminRows.length / adminPerPage));
+    if (adminCurrentPage > totalPages) adminCurrentPage = totalPages;
+
+    var start = (adminCurrentPage - 1) * adminPerPage;
+    var end = start + adminPerPage;
+    adminRows.forEach(function(row, index) {
+      row.style.display = (index >= start && index < end) ? '' : 'none';
+    });
+
+    adminPageInfo.textContent = 'Page ' + adminCurrentPage + ' of ' + totalPages;
+    if (adminPrevBtn) adminPrevBtn.disabled = adminCurrentPage <= 1;
+    if (adminNextBtn) adminNextBtn.disabled = adminCurrentPage >= totalPages;
+  }
+
+  if (adminPrevBtn) {
+    adminPrevBtn.addEventListener('click', function() {
+      adminCurrentPage = Math.max(1, adminCurrentPage - 1);
+      renderAdminUsersPage();
+    });
+  }
+
+  if (adminNextBtn) {
+    adminNextBtn.addEventListener('click', function() {
+      var totalPages = Math.max(1, Math.ceil(adminRows.length / adminPerPage));
+      adminCurrentPage = Math.min(totalPages, adminCurrentPage + 1);
+      renderAdminUsersPage();
+    });
+  }
+
+  renderAdminUsersPage();
+
+  function openBackdrop(id) {
+    var backdrop = document.getElementById(id);
+    if (!backdrop) return;
+    backdrop.classList.add('open');
+    backdrop.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeBackdrop(id) {
+    var backdrop = document.getElementById(id);
+    if (!backdrop) return;
+    backdrop.classList.remove('open');
+    backdrop.setAttribute('aria-hidden', 'true');
+  }
+
+  document.querySelectorAll('[data-close-modal]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      closeBackdrop(btn.getAttribute('data-close-modal'));
+    });
+  });
+
+  document.querySelectorAll('.admin-modal-backdrop').forEach(function(backdrop) {
+    backdrop.addEventListener('click', function(evt) {
+      if (evt.target === backdrop) {
+        closeBackdrop(backdrop.id);
+      }
+    });
+  });
+
+  var notifyModalHint = document.getElementById('adminNotifyModalHint');
+  var notifyUserId = document.getElementById('modalNotificationUserId');
+  var notifyEnabled = document.getElementById('modalNotificationEnabled');
+  var notifyTagInputs = Array.from(document.querySelectorAll('[data-modal-notify-tag]'));
+  document.querySelectorAll('[data-open-notification-modal]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var userId = btn.getAttribute('data-user-id') || '';
+      var username = btn.getAttribute('data-username') || '';
+      var email = btn.getAttribute('data-user-email') || '';
+      var enabled = btn.getAttribute('data-enabled') === '1';
+      var tagsRaw = (btn.getAttribute('data-tags') || '').trim();
+      var selectedTags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }) : [];
+
+      if (notifyUserId) notifyUserId.value = userId;
+      if (notifyEnabled) notifyEnabled.checked = enabled;
+      if (notifyModalHint) {
+        notifyModalHint.textContent = 'Configure notifications for ' + username + (email ? ' (' + email + ')' : '');
+      }
+
+      notifyTagInputs.forEach(function(input) {
+        input.checked = selectedTags.indexOf(input.value) >= 0;
+      });
+
+      openBackdrop('adminNotifyModalBackdrop');
+    });
+  });
+
+  var passwordModalHint = document.getElementById('adminPasswordModalHint');
+  var resetUserId = document.getElementById('modalResetUserId');
+  document.querySelectorAll('[data-open-password-modal]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var userId = btn.getAttribute('data-user-id') || '';
+      var username = btn.getAttribute('data-username') || '';
+      if (resetUserId) resetUserId.value = userId;
+      if (passwordModalHint) passwordModalHint.textContent = 'Set new password for ' + username + '.';
+      openBackdrop('adminPasswordModalBackdrop');
+    });
+  });
+
 });
+
+function confirmDeleteAdminUser(username) {
+  if (!confirm('Remove admin user "' + username + '"?')) {
+    return false;
+  }
+  var secondCheck = prompt('Type DELETE to confirm removal of "' + username + '"');
+  return secondCheck === 'DELETE';
+}
 
 function toggleConfigTplEdit(id) {
   var targetId = 'cfg-tpl-edit-' + id;

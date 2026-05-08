@@ -1,6 +1,5 @@
 {% extends 'base.html' %}
 {% block content %}
-<link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
 <style>
   .section-layout {
     display: grid;
@@ -13,14 +12,12 @@
     overflow: hidden;
     background: #fff;
   }
-  .section-editor {
-    min-height: 360px;
+  .section-editor-wrap textarea {
+    min-height: 420px;
   }
-  .section-editor .ql-editor {
-    min-height: 360px;
-    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
-    font-size: 11pt;
-    line-height: 1.65;
+  .tox-tinymce {
+    border: none !important;
+    border-radius: 8px;
   }
   .section-list {
     max-height: 520px;
@@ -116,31 +113,7 @@
           <span class="hint">AI uses document template name, section details, current content, and all section summaries for Ambifo-specific output.</span>
         </div>
         <div class="section-editor-wrap full">
-          <div id="section-editor-toolbar">
-            <span class="ql-formats">
-              <select class="ql-header">
-                <option value="1"></option>
-                <option value="2"></option>
-                <option value="3"></option>
-                <option selected></option>
-              </select>
-            </span>
-            <span class="ql-formats">
-              <button class="ql-bold"></button>
-              <button class="ql-italic"></button>
-              <button class="ql-underline"></button>
-            </span>
-            <span class="ql-formats">
-              <button class="ql-list" value="ordered"></button>
-              <button class="ql-list" value="bullet"></button>
-              <button class="ql-blockquote"></button>
-            </span>
-            <span class="ql-formats">
-              <button class="ql-link"></button>
-              <button class="ql-clean"></button>
-            </span>
-          </div>
-          <div id="section-editor" class="section-editor"></div>
+          <textarea id="section-editor-textarea" name="section_editor_area">{{ (selected_section.content_html if selected_section else '') | e }}</textarea>
         </div>
         <button class="btn" type="submit">Save Section Content</button>
       </form>
@@ -149,17 +122,31 @@
   </div>
 </section>
 
-<script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/tinymce/tinymce.min.js') }}"></script>
 <script>
-var sectionQuill = null;
+var sectionTinyMCE = null;
 
-async function generateSectionContentAI() {
+function getSectionContent() {
+  if (sectionTinyMCE) {
+    return sectionTinyMCE.getContent({ format: 'html' });
+  }
+  var ta = document.getElementById('section-editor-textarea');
+  return ta ? ta.value : '';
+}
+
+function setSectionContent(html) {
+  if (sectionTinyMCE) {
+    sectionTinyMCE.setContent(html || '<p></p>');
+  }
+}
+
+window.generateSectionContentAI = async function generateSectionContentAI() {
   var btn = document.getElementById('ai-section-generate-btn');
   var templateId = document.getElementById('ai-template-id')?.value;
   var sectionId = document.getElementById('ai-section-id')?.value;
   var extraPrompt = document.getElementById('ai-section-extra-prompt')?.value || '';
 
-  if (!sectionQuill) {
+  if (!sectionTinyMCE) {
     alert('Editor is not ready yet. Please refresh and try again.');
     return;
   }
@@ -178,7 +165,7 @@ async function generateSectionContentAI() {
         template_id: templateId,
         section_id: sectionId,
         extra_prompt: extraPrompt,
-        current_content: sectionQuill.root.innerHTML || ''
+        current_content: getSectionContent()
       })
     });
     var data = await res.json();
@@ -186,33 +173,51 @@ async function generateSectionContentAI() {
       alert(data.message || 'AI generation failed.');
       return;
     }
-    sectionQuill.root.innerHTML = data.content_html || '<p>No content generated.</p>';
-    document.getElementById('section-content-input').value = sectionQuill.root.innerHTML;
+    setSectionContent(data.content_html || '<p>No content generated.</p>');
+    document.getElementById('section-content-input').value = getSectionContent();
   } catch (err) {
     alert('AI request failed. Check AI settings in Configuration.');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Generate with AI';
   }
-}
+};
 
 document.addEventListener('DOMContentLoaded', function() {
   var form = document.getElementById('section-content-form');
   var input = document.getElementById('section-content-input');
   if (!form || !input) return;
 
-  sectionQuill = new Quill('#section-editor', {
-    theme: 'snow',
-    modules: { toolbar: '#section-editor-toolbar' },
-    placeholder: 'Edit section content here...'
+  if (!window.tinymce) {
+    alert('TinyMCE failed to load. Please check internet access and refresh.');
+    return;
+  }
+
+  tinymce.init({
+    selector: '#section-editor-textarea',
+    height: 460,
+    menubar: false,
+    branding: false,
+    promotion: false,
+    convert_urls: false,
+    plugins: 'advlist lists link table code autoresize',
+    toolbar: 'undo redo | blocks | bold italic underline strikethrough | bullist numlist blockquote | alignleft aligncenter alignright | link table | code removeformat',
+    valid_elements: '*[*]',
+    extended_valid_elements: '*[*]',
+    content_style: 'body { font-family: Calibri, Segoe UI, Arial, sans-serif; font-size: 11pt; line-height: 1.65; }',
+    setup: function(editor) {
+      sectionTinyMCE = editor;
+      editor.on('init', function() {
+        input.value = getSectionContent();
+      });
+      editor.on('Change KeyUp SetContent Undo Redo', function() {
+        input.value = getSectionContent();
+      });
+    }
   });
 
-  var initialHtml = {{ (selected_section.content_html if selected_section else '') | tojson }};
-  sectionQuill.root.innerHTML = initialHtml || '';
-  input.value = sectionQuill.root.innerHTML;
-
   form.addEventListener('submit', function() {
-    input.value = sectionQuill.root.innerHTML;
+    input.value = getSectionContent();
   });
 });
 </script>
