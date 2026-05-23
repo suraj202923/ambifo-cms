@@ -529,6 +529,14 @@
         <h3>Email Templates</h3>
         <p class="hint">Create and manage templates here. Email menu is now only for bulk/custom send and email history.</p>
 
+        <form method="get" class="inline-form" style="margin-bottom:0.7rem;">
+          <input name="cfg_tpl_q" value="{{ cfg_tpl_q or '' }}" placeholder="Search templates by name or subject">
+          <input name="cfg_customer_q" value="{{ cfg_customer_q or '' }}" placeholder="Search customers for test context">
+          <input type="hidden" name="cfg_tpl_page" value="1">
+          <input type="hidden" name="cfg_customer_page" value="1">
+          <button class="btn" type="submit">Filter</button>
+        </form>
+
         <div class="hint" style="display:flex;flex-wrap:wrap;gap:6px 8px;margin-bottom:0.55rem;">
           {% for macro in email_macro_catalog %}
             <code>{{ macro }}</code>
@@ -643,8 +651,39 @@
               </tbody>
             </table>
           </div>
+          {% if email_templates_pagination and email_templates_pagination.pages > 1 %}
+          <div class="pagination" style="margin-top:0.55rem;">
+            {% if email_templates_pagination.has_prev %}
+              <a class="page-link" href="{{ url_for('crm.configuration', cfg_tpl_q=cfg_tpl_q, cfg_tpl_page=email_templates_pagination.prev_num, cfg_customer_q=cfg_customer_q, cfg_customer_page=customers_pagination.page) }}#email-template-config">Previous</a>
+            {% else %}
+              <span class="page-link disabled">Previous</span>
+            {% endif %}
+            <span>Template Page {{ email_templates_pagination.page }} of {{ email_templates_pagination.pages }}</span>
+            {% if email_templates_pagination.has_next %}
+              <a class="page-link" href="{{ url_for('crm.configuration', cfg_tpl_q=cfg_tpl_q, cfg_tpl_page=email_templates_pagination.next_num, cfg_customer_q=cfg_customer_q, cfg_customer_page=customers_pagination.page) }}#email-template-config">Next</a>
+            {% else %}
+              <span class="page-link disabled">Next</span>
+            {% endif %}
+          </div>
+          {% endif %}
         {% else %}
           <p class="hint">No templates available yet.</p>
+        {% endif %}
+
+        {% if customers_pagination and customers_pagination.pages > 1 %}
+        <div class="pagination" style="margin-top:0.55rem;">
+          {% if customers_pagination.has_prev %}
+            <a class="page-link" href="{{ url_for('crm.configuration', cfg_tpl_q=cfg_tpl_q, cfg_tpl_page=email_templates_pagination.page, cfg_customer_q=cfg_customer_q, cfg_customer_page=customers_pagination.prev_num) }}#email-template-config">Previous</a>
+          {% else %}
+            <span class="page-link disabled">Previous</span>
+          {% endif %}
+          <span>Customer Context Page {{ customers_pagination.page }} of {{ customers_pagination.pages }}</span>
+          {% if customers_pagination.has_next %}
+            <a class="page-link" href="{{ url_for('crm.configuration', cfg_tpl_q=cfg_tpl_q, cfg_tpl_page=email_templates_pagination.page, cfg_customer_q=cfg_customer_q, cfg_customer_page=customers_pagination.next_num) }}#email-template-config">Next</a>
+          {% else %}
+            <span class="page-link disabled">Next</span>
+          {% endif %}
+        </div>
         {% endif %}
       </section>
 

@@ -315,27 +315,90 @@ def register_opportunity_core_routes(
         ensure_default_segments()
         ensure_default_cloud_operators()
         from flask import current_app
+        history_page = max(request.args.get("history_page", 1, type=int) or 1, 1)
+        reference_page = max(request.args.get("reference_page", 1, type=int) or 1, 1)
+        gathering_request_page = max(request.args.get("gathering_request_page", 1, type=int) or 1, 1)
+        server_page = max(request.args.get("server_page", 1, type=int) or 1, 1)
+        file_nas_page = max(request.args.get("file_nas_page", 1, type=int) or 1, 1)
+        block_page = max(request.args.get("block_page", 1, type=int) or 1, 1)
+        document_page = max(request.args.get("document_page", 1, type=int) or 1, 1)
+        sign_page = max(request.args.get("sign_page", 1, type=int) or 1, 1)
+
+        history_per_page = 20
+        reference_per_page = 8
+        gathering_request_per_page = 10
+        gathering_data_per_page = 15
+        document_per_page = 12
+        sign_per_page = 12
+
         customer = Customer.query.get_or_404(customer_id)
         status_options = OpportunityStatus.query.filter_by(is_active=True).order_by(OpportunityStatus.name.asc()).all()
         segment_options = OpportunitySegment.query.filter_by(is_active=True).order_by(OpportunitySegment.name.asc()).all()
         cloud_options = OpportunityCloudOperator.query.filter_by(is_active=True).order_by(OpportunityCloudOperator.name.asc()).all()
         admin_users = User.query.filter_by(is_active_user=True).order_by(User.username.asc()).all()
         email_templates = EmailTemplate.query.order_by(EmailTemplate.name.asc()).all()
-        history_entries = OpportunityHistory.query.filter_by(customer_id=customer.id).order_by(OpportunityHistory.created_at.desc()).all()
+        history_pagination = (
+            OpportunityHistory.query
+            .filter_by(customer_id=customer.id)
+            .order_by(OpportunityHistory.created_at.desc())
+            .paginate(page=history_page, per_page=history_per_page, error_out=False)
+        )
+        history_entries = history_pagination.items
         history_tag_colors = tag_color_map()
         update_tags = OpportunityUpdateTag.query.filter_by(is_active=True).order_by(OpportunityUpdateTag.name.asc()).all()
-        gathering_entries = GatheringServerDetail.query.filter_by(customer_id=customer.id).order_by(GatheringServerDetail.created_at.desc()).all()
-        file_nas_entries = GatheringFileNasDetail.query.filter_by(customer_id=customer.id).order_by(GatheringFileNasDetail.created_at.desc()).all()
-        block_storage_entries = GatheringBlockStorageDetail.query.filter_by(customer_id=customer.id).order_by(GatheringBlockStorageDetail.created_at.desc()).all()
-        documents = CustomerDocument.query.filter_by(customer_id=customer.id).order_by(CustomerDocument.created_at.desc()).all()
+        gathering_entries_pagination = (
+            GatheringServerDetail.query
+            .filter_by(customer_id=customer.id)
+            .order_by(GatheringServerDetail.created_at.desc())
+            .paginate(page=server_page, per_page=gathering_data_per_page, error_out=False)
+        )
+        gathering_entries = gathering_entries_pagination.items
+        file_nas_entries_pagination = (
+            GatheringFileNasDetail.query
+            .filter_by(customer_id=customer.id)
+            .order_by(GatheringFileNasDetail.created_at.desc())
+            .paginate(page=file_nas_page, per_page=gathering_data_per_page, error_out=False)
+        )
+        file_nas_entries = file_nas_entries_pagination.items
+        block_storage_entries_pagination = (
+            GatheringBlockStorageDetail.query
+            .filter_by(customer_id=customer.id)
+            .order_by(GatheringBlockStorageDetail.created_at.desc())
+            .paginate(page=block_page, per_page=gathering_data_per_page, error_out=False)
+        )
+        block_storage_entries = block_storage_entries_pagination.items
+        documents_pagination = (
+            CustomerDocument.query
+            .filter_by(customer_id=customer.id)
+            .order_by(CustomerDocument.created_at.desc())
+            .paginate(page=document_page, per_page=document_per_page, error_out=False)
+        )
+        documents = documents_pagination.items
+        sign_documents_pagination = (
+            CustomerDocument.query
+            .filter(
+                CustomerDocument.customer_id == customer.id,
+                CustomerDocument.docusign_envelope_id.isnot(None),
+            )
+            .order_by(CustomerDocument.created_at.desc())
+            .paginate(page=sign_page, per_page=sign_per_page, error_out=False)
+        )
+        sign_documents = sign_documents_pagination.items
         customer_diagrams = CustomerDiagram.query.filter_by(customer_id=customer.id).order_by(CustomerDiagram.created_at.desc()).all()
-        gathering_requests = GatheringRequest.query.filter_by(customer_id=customer.id).order_by(GatheringRequest.created_at.desc()).all()
+        gathering_requests_pagination = (
+            GatheringRequest.query
+            .filter_by(customer_id=customer.id)
+            .order_by(GatheringRequest.created_at.desc())
+            .paginate(page=gathering_request_page, per_page=gathering_request_per_page, error_out=False)
+        )
+        gathering_requests = gathering_requests_pagination.items
         mapped_ref_ids = [
             row.reference_contact_id
             for row in PartnerReferenceOpportunity.query.filter_by(customer_id=customer.id).all()
         ]
+        reference_query = None
         if mapped_ref_ids:
-            reference_contacts = (
+            reference_query = (
                 PartnerReferenceContact.query
                 .filter(
                     db.or_(
@@ -344,15 +407,16 @@ def register_opportunity_core_routes(
                     )
                 )
                 .order_by(PartnerReferenceContact.created_at.desc())
-                .all()
             )
         else:
-            reference_contacts = PartnerReferenceContact.query.filter_by(customer_id=customer.id).order_by(PartnerReferenceContact.created_at.desc()).all()
+            reference_query = PartnerReferenceContact.query.filter_by(customer_id=customer.id).order_by(PartnerReferenceContact.created_at.desc())
+        reference_contacts_pagination = reference_query.paginate(page=reference_page, per_page=reference_per_page, error_out=False)
+        reference_contacts = reference_contacts_pagination.items
         all_reference_contacts = PartnerReferenceContact.query.order_by(
             PartnerReferenceContact.partner_name.asc(),
             PartnerReferenceContact.contact_name.asc(),
         ).all()
-        assigned_reference_ids = {r.id for r in reference_contacts}
+        assigned_reference_ids = set(mapped_ref_ids)
         ref_activity_map = {}
         if reference_contacts:
             ref_ids = [r.id for r in reference_contacts]
@@ -387,6 +451,15 @@ def register_opportunity_core_routes(
                 reference_contacts=reference_contacts, ref_activity_map=ref_activity_map,
                 all_reference_contacts=all_reference_contacts,
                 assigned_reference_ids=assigned_reference_ids,
+                history_pagination=history_pagination,
+                reference_contacts_pagination=reference_contacts_pagination,
+                gathering_requests_pagination=gathering_requests_pagination,
+                gathering_entries_pagination=gathering_entries_pagination,
+                file_nas_entries_pagination=file_nas_entries_pagination,
+                block_storage_entries_pagination=block_storage_entries_pagination,
+                documents_pagination=documents_pagination,
+                sign_documents_pagination=sign_documents_pagination,
+                sign_documents=sign_documents,
                 active_tab="info",
                 base_url=current_app.config.get("APP_BASE_URL", "http://127.0.0.1:5000"),
                 pending_form_data=pending_form_data,
@@ -496,12 +569,21 @@ def register_opportunity_core_routes(
             file_nas_entries=file_nas_entries,
             block_storage_entries=block_storage_entries,
             documents=documents,
+            sign_documents=sign_documents,
             customer_diagrams=customer_diagrams,
             gathering_requests=gathering_requests,
             reference_contacts=reference_contacts,
             ref_activity_map=ref_activity_map,
             all_reference_contacts=all_reference_contacts,
             assigned_reference_ids=assigned_reference_ids,
+            history_pagination=history_pagination,
+            reference_contacts_pagination=reference_contacts_pagination,
+            gathering_requests_pagination=gathering_requests_pagination,
+            gathering_entries_pagination=gathering_entries_pagination,
+            file_nas_entries_pagination=file_nas_entries_pagination,
+            block_storage_entries_pagination=block_storage_entries_pagination,
+            documents_pagination=documents_pagination,
+            sign_documents_pagination=sign_documents_pagination,
             teams_auto_available=TeamsService(current_app).is_configured(),
             active_tab=request.args.get("tab", "info"),
             base_url=current_app.config.get("APP_BASE_URL", "http://127.0.0.1:5000"),
@@ -781,6 +863,15 @@ def register_opportunity_core_routes(
         db.session.commit()
         flash("Manual update added.", "success")
         return redirect(url_for("crm.opportunity_edit", customer_id=customer.id, tab="history"))
+
+    @bp.route("/opportunities/<int:customer_id>/history/<int:history_id>/delete", methods=["POST"])
+    @login_required
+    def opportunity_history_delete(customer_id, history_id):
+        entry = OpportunityHistory.query.filter_by(id=history_id, customer_id=customer_id).first_or_404()
+        db.session.delete(entry)
+        db.session.commit()
+        flash("History entry deleted.", "success")
+        return redirect(url_for("crm.opportunity_edit", customer_id=customer_id, tab="history"))
 
     # ── Deprecated / Redirect stubs ──────────────────────────────────────────
 

@@ -40,9 +40,10 @@ def register_reference_routes(
         page = request.args.get("page", 1, type=int)
         per_page = 10
 
-        last_activity_subq = (
+        activity_stats_subq = (
             db.session.query(
                 PartnerReferenceActivity.reference_contact_id.label("ref_id"),
+                db.func.count(PartnerReferenceActivity.id).label("activity_count"),
                 db.func.max(
                     db.func.coalesce(
                         PartnerReferenceActivity.activity_date,
@@ -55,8 +56,12 @@ def register_reference_routes(
         )
 
         contacts_query = (
-            db.session.query(PartnerReferenceContact, last_activity_subq.c.last_activity_at)
-            .outerjoin(last_activity_subq, PartnerReferenceContact.id == last_activity_subq.c.ref_id)
+            db.session.query(
+                PartnerReferenceContact,
+                db.func.coalesce(activity_stats_subq.c.activity_count, 0).label("activity_count"),
+                activity_stats_subq.c.last_activity_at,
+            )
+            .outerjoin(activity_stats_subq, PartnerReferenceContact.id == activity_stats_subq.c.ref_id)
         )
 
         if query:
@@ -75,7 +80,7 @@ def register_reference_routes(
         if sort_by == "latest_activity_desc":
             contacts_query = contacts_query.order_by(
                 last_activity_subq.c.last_activity_at.is_(None),
-                last_activity_subq.c.last_activity_at.desc(),
+                activity_stats_subq.c.last_activity_at.desc(),
                 PartnerReferenceContact.created_at.desc(),
             )
         elif sort_by == "newest_contact":
@@ -96,15 +101,14 @@ def register_reference_routes(
             sort_by = "latest_activity_desc"
             contacts_query = contacts_query.order_by(
                 last_activity_subq.c.last_activity_at.is_(None),
-                last_activity_subq.c.last_activity_at.desc(),
+                activity_stats_subq.c.last_activity_at.desc(),
                 PartnerReferenceContact.created_at.desc(),
             )
 
         pagination = contacts_query.paginate(page=page, per_page=per_page, error_out=False)
 
         rows = []
-        for contact, last_activity_at in pagination.items:
-            activity_count = PartnerReferenceActivity.query.filter_by(reference_contact_id=contact.id).count()
+        for contact, activity_count, last_activity_at in pagination.items:
             rows.append(
                 {
                     "contact": contact,

@@ -73,6 +73,8 @@ def _ensure_runtime_schema_updates():
         history_columns = {col["name"] for col in inspector.get_columns("opportunity_histories")}
         if "tag_name" not in history_columns:
             db.session.execute(text("ALTER TABLE opportunity_histories ADD COLUMN tag_name VARCHAR(40)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_opportunity_histories_customer_created_at ON opportunity_histories (customer_id, created_at DESC)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_opportunity_histories_tag_created_at ON opportunity_histories (tag_name, created_at DESC)"))
 
     if "meeting_availability_requests" in existing_tables:
         mar_columns = {col["name"] for col in inspector.get_columns("meeting_availability_requests")}
@@ -107,6 +109,8 @@ def _ensure_runtime_schema_updates():
             db.session.execute(text("ALTER TABLE customers ADD COLUMN main_page_address VARCHAR(255)"))
         if "billing" not in customer_columns:
             db.session.execute(text("ALTER TABLE customers ADD COLUMN billing VARCHAR(255)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_customers_created_at ON customers (created_at DESC)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_customers_assign_created_at ON customers (assign_to_user_id, created_at DESC)"))
 
     if "opportunity_segments" in existing_tables:
         segment_columns = {col["name"] for col in inspector.get_columns("opportunity_segments")}
@@ -351,6 +355,19 @@ def _ensure_runtime_schema_updates():
             db.session.execute(text("ALTER TABLE leads ADD COLUMN converted_at TIMESTAMP"))
         if "converted_customer_id" not in lead_columns:
             db.session.execute(text("ALTER TABLE leads ADD COLUMN converted_customer_id INTEGER"))
+
+    if "customer_documents" in existing_tables:
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_customer_documents_customer_created_at ON customer_documents (customer_id, created_at DESC)"))
+    if "customer_diagrams" in existing_tables:
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_customer_diagrams_customer_created_at ON customer_diagrams (customer_id, created_at DESC)"))
+    if "gathering_requests" in existing_tables:
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_gathering_requests_customer_created_at ON gathering_requests (customer_id, created_at DESC)"))
+    if "gathering_server_details" in existing_tables:
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_gathering_server_details_customer_created_at ON gathering_server_details (customer_id, created_at DESC)"))
+    if "gathering_file_nas_details" in existing_tables:
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_gathering_file_nas_details_customer_created_at ON gathering_file_nas_details (customer_id, created_at DESC)"))
+    if "gathering_block_storage_details" in existing_tables:
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_gathering_block_storage_details_customer_created_at ON gathering_block_storage_details (customer_id, created_at DESC)"))
 
     default_tags = [
         ("important", "#c0392b"),

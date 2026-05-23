@@ -2,8 +2,10 @@ from datetime import datetime, timedelta
 
 from flask import jsonify, render_template, request
 from flask_login import login_required
+from sqlalchemy import func
+from sqlalchemy.orm import joinedload, load_only
 
-from app.models import Customer, MeetingInvite, OpportunityHistory, OpportunityUpdateTag
+from app.models import Customer, MeetingInvite, OpportunityHistory, OpportunityUpdateTag, User
 
 
 def register_dashboard_routes(bp, *, derive_tag_from_action, tag_color_map):
@@ -51,23 +53,48 @@ def register_dashboard_routes(bp, *, derive_tag_from_action, tag_color_map):
         return raw, "Unknown"
 
     def _build_dashboard_graph_payload(start_dt, end_dt):
-        customers = Customer.query.filter(Customer.created_at >= start_dt, Customer.created_at < end_dt).all()
+        assign_rows = (
+            Customer.query
+            .outerjoin(User, Customer.assign_to_user_id == User.id)
+            .with_entities(func.coalesce(User.username, "Unassigned"), func.count(Customer.id))
+            .filter(Customer.created_at >= start_dt, Customer.created_at < end_dt)
+            .group_by(func.coalesce(User.username, "Unassigned"))
+            .all()
+        )
+        segment_rows = (
+            Customer.query
+            .with_entities(func.coalesce(func.nullif(func.trim(Customer.segment), ""), "Not Set"), func.count(Customer.id))
+            .filter(Customer.created_at >= start_dt, Customer.created_at < end_dt)
+            .group_by(func.coalesce(func.nullif(func.trim(Customer.segment), ""), "Not Set"))
+            .all()
+        )
+        status_rows = (
+            Customer.query
+            .with_entities(func.coalesce(func.nullif(func.trim(Customer.deal_status), ""), "Not Set"), func.count(Customer.id))
+            .filter(Customer.created_at >= start_dt, Customer.created_at < end_dt)
+            .group_by(func.coalesce(func.nullif(func.trim(Customer.deal_status), ""), "Not Set"))
+            .all()
+        )
+        city_values = (
+            Customer.query
+            .with_entities(Customer.city)
+            .filter(Customer.created_at >= start_dt, Customer.created_at < end_dt)
+            .all()
+        )
+        total_opportunities = (
+            Customer.query
+            .filter(Customer.created_at >= start_dt, Customer.created_at < end_dt)
+            .count()
+        )
 
-        assign_counts = {}
-        segment_counts = {}
-        status_counts = {}
+        assign_counts = {label: count for label, count in assign_rows}
+        segment_counts = {label: count for label, count in segment_rows}
+        status_counts = {label: count for label, count in status_rows}
         country_counts = {}
         city_counts = {}
 
-        for c in customers:
-            assignee = c.assigned_to.username if c.assigned_to else "Unassigned"
-            segment = (c.segment or "Not Set").strip() or "Not Set"
-            status = (c.deal_status or "Not Set").strip() or "Not Set"
-            city, country = _split_city_country(c.city)
-
-            assign_counts[assignee] = assign_counts.get(assignee, 0) + 1
-            segment_counts[segment] = segment_counts.get(segment, 0) + 1
-            status_counts[status] = status_counts.get(status, 0) + 1
+        for (city_value,) in city_values:
+            city, country = _split_city_country(city_value)
             country_counts[country] = country_counts.get(country, 0) + 1
             city_counts[city] = city_counts.get(city, 0) + 1
 
@@ -75,7 +102,7 @@ def register_dashboard_routes(bp, *, derive_tag_from_action, tag_color_map):
 
         return {
             "summary": {
-                "total_opportunities": len(customers),
+                "total_opportunities": total_opportunities,
                 "from": start_dt.strftime("%Y-%m-%d"),
                 "to": (end_dt - timedelta(days=1)).strftime("%Y-%m-%d"),
             },
@@ -131,7 +158,23 @@ def register_dashboard_routes(bp, *, derive_tag_from_action, tag_color_map):
         if limit > 200:
             limit = 200
 
-        query = OpportunityHistory.query.order_by(OpportunityHistory.created_at.desc())
+        query = (
+            OpportunityHistory.query
+            .options(
+                load_only(
+                    OpportunityHistory.id,
+                    OpportunityHistory.customer_id,
+                    OpportunityHistory.changed_by,
+                    OpportunityHistory.action,
+                    OpportunityHistory.tag_name,
+                    OpportunityHistory.changes_summary,
+                    OpportunityHistory.remark,
+                    OpportunityHistory.created_at,
+                ),
+                joinedload(OpportunityHistory.customer).load_only(Customer.id, Customer.customer_name),
+            )
+            .order_by(OpportunityHistory.created_at.desc())
+        )
         if tag_filter != "all":
             query = query.filter(OpportunityHistory.tag_name == tag_filter)
         rows = query.limit(limit).all()
@@ -178,6 +221,18 @@ def register_dashboard_routes(bp, *, derive_tag_from_action, tag_color_map):
         now = datetime.utcnow()
         rows = (
             MeetingInvite.query
+            .options(
+                load_only(
+                    MeetingInvite.id,
+                    MeetingInvite.customer_id,
+                    MeetingInvite.recipient_email,
+                    MeetingInvite.subject,
+                    MeetingInvite.meeting_link,
+                    MeetingInvite.scheduled_at,
+                    MeetingInvite.created_by,
+                ),
+                joinedload(MeetingInvite.customer).load_only(Customer.id, Customer.customer_name),
+            )
             .filter(MeetingInvite.scheduled_at.isnot(None), MeetingInvite.scheduled_at >= now)
             .order_by(MeetingInvite.scheduled_at.asc())
             .limit(limit)

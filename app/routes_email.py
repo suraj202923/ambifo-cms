@@ -101,8 +101,27 @@ def register_email_routes(
 
     @bp.route("/emails/send", methods=["GET", "POST"])
     def send_template_email():
-        selected_customer_id = request.args.get("customer_id", type=int)
-        customers = Customer.query.order_by(Customer.customer_name.asc()).all()
+        selected_customer_id = request.values.get("customer_id", type=int)
+        customer_q = (request.values.get("customer_q") or "").strip()
+        customer_page = request.values.get("customer_page", 1, type=int)
+        customers_query = Customer.query
+        if customer_q:
+            like = f"%{customer_q}%"
+            customers_query = customers_query.filter(
+                db.or_(
+                    Customer.customer_name.ilike(like),
+                    Customer.email.ilike(like),
+                    Customer.account_name.ilike(like),
+                )
+            )
+        customers_pagination = customers_query.order_by(Customer.customer_name.asc()).paginate(
+            page=max(customer_page or 1, 1), per_page=50, error_out=False
+        )
+        customers = list(customers_pagination.items)
+        if selected_customer_id and all(c.id != selected_customer_id for c in customers):
+            selected_customer = Customer.query.get(selected_customer_id)
+            if selected_customer:
+                customers.insert(0, selected_customer)
         templates = EmailTemplate.query.order_by(EmailTemplate.name.asc()).all()
 
         if request.method == "POST":
@@ -115,7 +134,14 @@ def register_email_routes(
 
             if not customer or not template:
                 flash("Select a valid customer and template.", "error")
-                return render_template("send_email.html", customers=customers, templates=templates)
+                return render_template(
+                    "send_email.html",
+                    customers=customers,
+                    customers_pagination=customers_pagination,
+                    customer_q=customer_q,
+                    templates=templates,
+                    selected_customer_id=customer_id,
+                )
 
             macro_values = build_template_macro_values_for_customer(
                 customer,
@@ -168,11 +194,13 @@ def register_email_routes(
             else:
                 flash(f"Email failed: {result.error}", "error")
 
-            return redirect(url_for("crm.send_template_email"))
+            return redirect(url_for("crm.send_template_email", customer_id=customer.id, customer_q=customer_q, customer_page=customer_page))
 
         return render_template(
             "send_email.html",
             customers=customers,
+            customers_pagination=customers_pagination,
+            customer_q=customer_q,
             templates=templates,
             selected_customer_id=selected_customer_id,
         )

@@ -174,16 +174,34 @@
         {% for h in history_entries %}
           {% set effective_tag = (h.tag_name or ('docusign' if 'docusign' in h.action else ('email' if h.action.startswith('email') else ('gathering' if 'gathering' in h.action else ('status' if 'status' in h.action else ('segment' if 'segment' in h.action else ('assign' if 'assign' in h.action else 'update')))))) ) %}
           {% set tag_color = history_tag_colors.get(effective_tag, '#6b7280') if history_tag_colors else '#6b7280' %}
-          <div class="history-item" data-action="{{ h.action }}" style="margin-bottom:0.55rem;">
-            <div class="history-meta">
-              {{ h.created_at.strftime('%Y-%m-%d %H:%M') }} • {{ h.changed_by or 'system' }} • <strong>{{ h.action }}</strong>
-              <span style="display:inline-block;margin-left:0.4rem;padding:0.05rem 0.45rem;border-radius:999px;font-size:0.7rem;font-weight:700;color:#fff;background:{{ tag_color }};">{{ effective_tag }}</span>
+          <div class="history-item" data-action="{{ h.action }}" style="margin-bottom:0.55rem;position:relative;">
+            <div class="history-meta" style="display:flex;align-items:flex-start;gap:0.5rem;flex-wrap:wrap;">
+              <span style="flex:1;min-width:0;">
+                {{ h.created_at.strftime('%Y-%m-%d %H:%M') }} • {{ h.changed_by or 'system' }} • <strong>{{ h.action }}</strong>
+                <span style="display:inline-block;margin-left:0.4rem;padding:0.05rem 0.45rem;border-radius:999px;font-size:0.7rem;font-weight:700;color:#fff;background:{{ tag_color }};">{{ effective_tag }}</span>
+              </span>
+              {% if h.action == 'manual-update' %}
+              <form method="post" action="{{ url_for('crm.opportunity_history_delete', customer_id=customer.id, history_id=h.id) }}" style="margin:0;" onsubmit="return confirm('Delete this history entry?');">
+                <button type="submit" title="Delete entry" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:0.85rem;padding:0 0.25rem;line-height:1;" aria-label="Delete">🗑</button>
+              </form>
+              {% endif %}
             </div>
             <div class="history-change">{{ h.changes_summary }}</div>
             {% if h.remark %}<div class="history-remark">Remark: {{ h.remark }}</div>{% endif %}
           </div>
         {% endfor %}
       </div>
+      {% if history_pagination and history_pagination.pages > 1 %}
+      <div class="pagination" style="margin-top:0.5rem;">
+        {% if history_pagination.has_prev %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='history', history_page=history_pagination.prev_num, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Previous</a>
+        {% endif %}
+        <span>Page {{ history_pagination.page }} of {{ history_pagination.pages }}</span>
+        {% if history_pagination.has_next %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='history', history_page=history_pagination.next_num, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Next</a>
+        {% endif %}
+      </div>
+      {% endif %}
     {% else %}
       <p class="hint" style="margin-top:0.75rem;">No history recorded yet.</p>
     {% endif %}
@@ -349,6 +367,17 @@
         </div>
       </div>
       {% endfor %}
+      {% if reference_contacts_pagination and reference_contacts_pagination.pages > 1 %}
+      <div class="pagination" style="margin-top:0.5rem;">
+        {% if reference_contacts_pagination.has_prev %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='references', history_page=history_pagination.page, reference_page=reference_contacts_pagination.prev_num, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Previous</a>
+        {% endif %}
+        <span>Page {{ reference_contacts_pagination.page }} of {{ reference_contacts_pagination.pages }}</span>
+        {% if reference_contacts_pagination.has_next %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='references', history_page=history_pagination.page, reference_page=reference_contacts_pagination.next_num, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Next</a>
+        {% endif %}
+      </div>
+      {% endif %}
     {% else %}
       <p class="hint" style="margin-top:0.75rem;">No partner reference contacts added yet.</p>
     {% endif %}
@@ -412,6 +441,17 @@
             </tbody>
           </table>
         </div>
+        {% if gathering_requests_pagination and gathering_requests_pagination.pages > 1 %}
+        <div class="pagination" style="margin-top:0.5rem;">
+          {% if gathering_requests_pagination.has_prev %}
+            <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='gathering', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.prev_num, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Previous</a>
+          {% endif %}
+          <span>Page {{ gathering_requests_pagination.page }} of {{ gathering_requests_pagination.pages }}</span>
+          {% if gathering_requests_pagination.has_next %}
+            <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='gathering', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.next_num, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Next</a>
+          {% endif %}
+        </div>
+        {% endif %}
       {% else %}
         <p class="hint">No gathering links sent yet.</p>
       {% endif %}
@@ -523,6 +563,17 @@
         </tbody>
       </table>
       </div>
+      {% if gathering_entries_pagination and gathering_entries_pagination.pages > 1 %}
+      <div class="pagination" style="margin-top:0.5rem;">
+        {% if gathering_entries_pagination.has_prev %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='gathering', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.prev_num, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Previous</a>
+        {% endif %}
+        <span>Page {{ gathering_entries_pagination.page }} of {{ gathering_entries_pagination.pages }}</span>
+        {% if gathering_entries_pagination.has_next %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='gathering', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.next_num, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Next</a>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
 
     <!-- FileNAS section -->
@@ -595,6 +646,17 @@
         </tbody>
       </table>
       </div>
+      {% if file_nas_entries_pagination and file_nas_entries_pagination.pages > 1 %}
+      <div class="pagination" style="margin-top:0.5rem;">
+        {% if file_nas_entries_pagination.has_prev %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='gathering', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.prev_num, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Previous</a>
+        {% endif %}
+        <span>Page {{ file_nas_entries_pagination.page }} of {{ file_nas_entries_pagination.pages }}</span>
+        {% if file_nas_entries_pagination.has_next %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='gathering', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.next_num, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Next</a>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
 
     <!-- Block Storage section -->
@@ -663,6 +725,17 @@
         </tbody>
       </table>
       </div>
+      {% if block_storage_entries_pagination and block_storage_entries_pagination.pages > 1 %}
+      <div class="pagination" style="margin-top:0.5rem;">
+        {% if block_storage_entries_pagination.has_prev %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='gathering', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.prev_num, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Previous</a>
+        {% endif %}
+        <span>Page {{ block_storage_entries_pagination.page }} of {{ block_storage_entries_pagination.pages }}</span>
+        {% if block_storage_entries_pagination.has_next %}
+          <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='gathering', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.next_num, document_page=documents_pagination.page, sign_page=sign_documents_pagination.page) }}">Next</a>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
   </div>
 
@@ -791,6 +864,17 @@
         <p class="hint" style="margin-top:0.5rem;">No documents uploaded yet.</p>
       {% endfor %}
     </div>
+    {% if documents_pagination and documents_pagination.pages > 1 %}
+    <div class="pagination" style="margin-top:0.5rem;">
+      {% if documents_pagination.has_prev %}
+        <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='documents', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.prev_num, sign_page=sign_documents_pagination.page) }}">Previous</a>
+      {% endif %}
+      <span>Page {{ documents_pagination.page }} of {{ documents_pagination.pages }}</span>
+      {% if documents_pagination.has_next %}
+        <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='documents', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.next_num, sign_page=sign_documents_pagination.page) }}">Next</a>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 
   <!-- ══ TAB 6: Sign Requests (DocuSign) ═══════════════ -->
@@ -828,8 +912,7 @@
     </div>
 
     <div class="doc-list">
-      {% set sign_docs = documents | selectattr('docusign_envelope_id') | list %}
-      {% for doc in sign_docs %}
+      {% for doc in sign_documents %}
         <div class="doc-item" style="display:block;">
           <div class="doc-meta" style="margin-bottom:8px;">
             <div class="doc-name">📄 {{ doc.original_filename }}</div>
@@ -865,6 +948,17 @@
         <p class="hint" style="margin-top:0.5rem;">No DocuSign sign requests found yet. Send a document from Document Editor to populate this list.</p>
       {% endfor %}
     </div>
+    {% if sign_documents_pagination and sign_documents_pagination.pages > 1 %}
+    <div class="pagination" style="margin-top:0.5rem;">
+      {% if sign_documents_pagination.has_prev %}
+        <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='sign-requests', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.prev_num) }}">Previous</a>
+      {% endif %}
+      <span>Page {{ sign_documents_pagination.page }} of {{ sign_documents_pagination.pages }}</span>
+      {% if sign_documents_pagination.has_next %}
+        <a class="page-link" href="{{ url_for('crm.opportunity_edit', customer_id=customer.id, tab='sign-requests', history_page=history_pagination.page, reference_page=reference_contacts_pagination.page, gathering_request_page=gathering_requests_pagination.page, server_page=gathering_entries_pagination.page, file_nas_page=file_nas_entries_pagination.page, block_page=block_storage_entries_pagination.page, document_page=documents_pagination.page, sign_page=sign_documents_pagination.next_num) }}">Next</a>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 
   <!-- ══ TAB 7: Create Diagram ════════════════════════ -->
@@ -1067,7 +1161,11 @@ function switchTab(name, btn) {
   var pane = document.getElementById('tab-' + name);
   if (pane) pane.classList.add('active');
   if (btn) btn.classList.add('active');
-  try { history.replaceState(null, '', location.pathname + '?tab=' + name); } catch(e) {}
+  try {
+    var params = new URLSearchParams(location.search);
+    params.set('tab', name);
+    history.replaceState(null, '', location.pathname + '?' + params.toString());
+  } catch(e) {}
 }
 
 document.addEventListener('DOMContentLoaded', function() {

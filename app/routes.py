@@ -2723,6 +2723,10 @@ def configuration():
     meeting_settings = _get_meeting_settings()
     ai_settings = _get_ai_settings()
     docusign_settings = _get_docusign_settings()
+    cfg_tpl_q = (request.args.get("cfg_tpl_q") or "").strip()
+    cfg_tpl_page = max(request.args.get("cfg_tpl_page", 1, type=int) or 1, 1)
+    cfg_customer_q = (request.args.get("cfg_customer_q") or "").strip()
+    cfg_customer_page = max(request.args.get("cfg_customer_page", 1, type=int) or 1, 1)
     app_settings = {
         "base_url": _get_effective_app_base_url(),
     }
@@ -2749,26 +2753,38 @@ def configuration():
     admin_users = User.query.order_by(User.created_at.asc()).all()
     admin_history_notification_subscriptions = load_admin_history_notification_subscriptions()
     notification_tag_names = get_notification_tag_names()
-    email_templates = EmailTemplate.query.order_by(EmailTemplate.created_at.desc()).all()
-    customers = Customer.query.order_by(Customer.customer_name.asc()).all()
-    active_diagrams = (
-        CustomerDiagram.query
-        .filter_by(is_active=True)
-        .order_by(CustomerDiagram.customer_id.asc(), CustomerDiagram.macro_key.asc())
-        .all()
-    )
-    diagram_macro_map = {}
-    for diagram in active_diagrams:
-        customer_key = str(diagram.customer_id)
-        if customer_key not in diagram_macro_map:
-            diagram_macro_map[customer_key] = []
-        if (diagram.macro_key or "").strip():
-            diagram_macro_map[customer_key].append(
-                {
-                    "macro_key": diagram.macro_key,
-                    "diagram_name": diagram.diagram_name,
-                }
+    email_templates_query = EmailTemplate.query
+    if cfg_tpl_q:
+        like = f"%{cfg_tpl_q}%"
+        email_templates_query = email_templates_query.filter(
+            db.or_(
+                EmailTemplate.name.ilike(like),
+                EmailTemplate.subject_template.ilike(like),
             )
+        )
+    email_templates_pagination = email_templates_query.order_by(EmailTemplate.created_at.desc()).paginate(
+        page=cfg_tpl_page,
+        per_page=15,
+        error_out=False,
+    )
+    email_templates = email_templates_pagination.items
+
+    customers_query = Customer.query
+    if cfg_customer_q:
+        like = f"%{cfg_customer_q}%"
+        customers_query = customers_query.filter(
+            db.or_(
+                Customer.customer_name.ilike(like),
+                Customer.email.ilike(like),
+                Customer.account_name.ilike(like),
+            )
+        )
+    customers_pagination = customers_query.order_by(Customer.customer_name.asc()).paginate(
+        page=cfg_customer_page,
+        per_page=40,
+        error_out=False,
+    )
+    customers = customers_pagination.items
 
     return render_template(
         "configuration.html",
@@ -2792,8 +2808,11 @@ def configuration():
         admin_history_notification_subscriptions=admin_history_notification_subscriptions,
         notification_tag_names=notification_tag_names,
         email_templates=email_templates,
+        email_templates_pagination=email_templates_pagination,
+        cfg_tpl_q=cfg_tpl_q,
         customers=customers,
-        diagram_macro_map=diagram_macro_map,
+        customers_pagination=customers_pagination,
+        cfg_customer_q=cfg_customer_q,
         email_macro_catalog=_email_template_macro_catalog(),
         system_template_names=_system_template_name_set(),
     )

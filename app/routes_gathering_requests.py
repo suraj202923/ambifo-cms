@@ -49,8 +49,27 @@ def register_gathering_request_routes(
 
     @bp.route("/gathering/send", methods=["GET", "POST"])
     def send_gathering_request():
-        customers = Customer.query.order_by(Customer.customer_name.asc()).all()
-        selected_customer_id = request.args.get("customer_id", type=int)
+        selected_customer_id = request.values.get("customer_id", type=int)
+        customer_q = (request.values.get("customer_q") or "").strip()
+        customer_page = request.values.get("customer_page", 1, type=int)
+        customers_query = Customer.query
+        if customer_q:
+            like = f"%{customer_q}%"
+            customers_query = customers_query.filter(
+                db.or_(
+                    Customer.customer_name.ilike(like),
+                    Customer.email.ilike(like),
+                    Customer.account_name.ilike(like),
+                )
+            )
+        customers_pagination = customers_query.order_by(Customer.customer_name.asc()).paginate(
+            page=max(customer_page or 1, 1), per_page=50, error_out=False
+        )
+        customers = list(customers_pagination.items)
+        if selected_customer_id and all(c.id != selected_customer_id for c in customers):
+            selected_customer = Customer.query.get(selected_customer_id)
+            if selected_customer:
+                customers.insert(0, selected_customer)
         default_expiry_days = 7
         form_values = {
             "cc": "",
@@ -84,6 +103,8 @@ def register_gathering_request_routes(
                 return render_template(
                     "send_gathering.html",
                     customers=customers,
+                    customers_pagination=customers_pagination,
+                    customer_q=customer_q,
                     selected_customer_id=customer_id,
                     default_expiry_days=default_expiry_days,
                     form_values=form_values,
@@ -94,6 +115,8 @@ def register_gathering_request_routes(
                 return render_template(
                     "send_gathering.html",
                     customers=customers,
+                    customers_pagination=customers_pagination,
+                    customer_q=customer_q,
                     selected_customer_id=selected_customer_id,
                     default_expiry_days=default_expiry_days,
                     form_values=form_values,
@@ -104,6 +127,8 @@ def register_gathering_request_routes(
                 return render_template(
                     "send_gathering.html",
                     customers=customers,
+                    customers_pagination=customers_pagination,
+                    customer_q=customer_q,
                     selected_customer_id=customer_id,
                     default_expiry_days=default_expiry_days,
                     form_values=form_values,
@@ -189,11 +214,13 @@ def register_gathering_request_routes(
                 "success",
             )
 
-            return redirect(url_for("crm.send_gathering_request"))
+            return redirect(url_for("crm.send_gathering_request", customer_id=customer.id, customer_q=customer_q, customer_page=customer_page))
 
         return render_template(
             "send_gathering.html",
             customers=customers,
+            customers_pagination=customers_pagination,
+            customer_q=customer_q,
             selected_customer_id=selected_customer_id,
             default_expiry_days=default_expiry_days,
             form_values=form_values,

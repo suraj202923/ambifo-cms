@@ -81,6 +81,10 @@ class Config:
     SECRET_KEY = str(_get_setting("SECRET_KEY", "App.SecretKey", "dev-secret-key"))
     SQLALCHEMY_DATABASE_URI = _build_database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,
+    }
 
     SMTP_HOST = str(_get_setting("SMTP_HOST", "SMTP.Host", ""))
     SMTP_PORT = int(_get_setting("SMTP_PORT", "SMTP.Port", 587))
