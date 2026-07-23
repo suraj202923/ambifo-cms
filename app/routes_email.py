@@ -260,3 +260,48 @@ def register_email_routes(
             result.append({"id": r.id, "queue_status": r.queue_status, "status": r.status})
         queued = sum(1 for r in records if r.queue_status in ("queued", "processing"))
         return jsonify(queued=queued, records=result)
+
+    @bp.route("/emails/retry/<int:log_id>", methods=["POST"])
+    @login_required
+    def email_retry(log_id):
+        """Re-queue a single failed email for retry."""
+        log = EmailLog.query.get_or_404(log_id)
+        if log.queue_status != "failed":
+            flash("Only failed emails can be retried.", "error")
+            return redirect(url_for("crm.template_list") + "#email-history")
+
+        log.queue_status = "queued"
+        log.status = "queued"
+        log.error_message = None
+        log.retry_count = (log.retry_count or 0) + 1
+        db.session.commit()
+
+        from app.services.email_queue import wake_queue_worker
+        wake_queue_worker()
+
+        flash(f"Email to {log.recipient_email} re-queued for retry.", "success")
+        return redirect(url_for("crm.template_list") + "#email-history")
+
+    @bp.route("/emails/retry-all-failed", methods=["POST"])
+    @login_required
+    def email_retry_all_failed():
+        """Re-queue all failed emails for retry."""
+        failed_logs = EmailLog.query.filter_by(queue_status="failed").all()
+        if not failed_logs:
+            flash("No failed emails to retry.", "info")
+            return redirect(url_for("crm.template_list") + "#email-history")
+
+        count = 0
+        for log in failed_logs:
+            log.queue_status = "queued"
+            log.status = "queued"
+            log.error_message = None
+            log.retry_count = (log.retry_count or 0) + 1
+            count += 1
+        db.session.commit()
+
+        from app.services.email_queue import wake_queue_worker
+        wake_queue_worker()
+
+        flash(f"{count} failed email(s) re-queued for retry.", "success")
+        return redirect(url_for("crm.template_list") + "#email-history")

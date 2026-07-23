@@ -71,6 +71,7 @@ class EmailLog(db.Model):
     status = db.Column(db.String(40), nullable=False)
     queue_status = db.Column(db.String(20), nullable=False, default="immediate")
     error_message = db.Column(db.Text, nullable=True)
+    retry_count = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     customer = db.relationship("Customer", backref="email_logs")

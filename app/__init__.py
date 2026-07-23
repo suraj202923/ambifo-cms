@@ -243,6 +243,8 @@ def _ensure_runtime_schema_updates():
             db.session.execute(text("ALTER TABLE email_logs ALTER COLUMN customer_id DROP NOT NULL"))
         if "queue_status" not in email_log_columns:
             db.session.execute(text("ALTER TABLE email_logs ADD COLUMN queue_status VARCHAR(20) NOT NULL DEFAULT 'immediate'"))
+        if "retry_count" not in email_log_columns:
+            db.session.execute(text("ALTER TABLE email_logs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0"))
 
     if "email_unsubscribes" not in existing_tables:
         db.session.execute(text(

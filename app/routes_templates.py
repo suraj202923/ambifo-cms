@@ -197,7 +197,11 @@ def register_template_routes(
             statuses = OpportunityStatus.query.filter_by(is_active=True).order_by(OpportunityStatus.name.asc()).all()
             segments = OpportunitySegment.query.filter_by(is_active=True).order_by(OpportunitySegment.name.asc()).all()
             hist_page = request.args.get("hist_page", 1, type=int)
-            history_pagination = EmailLog.query.order_by(EmailLog.created_at.desc()).paginate(
+            hist_status = (request.args.get("hist_status") or "all").strip()
+            history_query = EmailLog.query
+            if hist_status in ("queued", "processing", "sent", "failed"):
+                history_query = history_query.filter_by(queue_status=hist_status)
+            history_pagination = history_query.order_by(EmailLog.created_at.desc()).paginate(
                 page=hist_page, per_page=10, error_out=False
             )
             unsub_page = request.args.get("unsub_page", 1, type=int)
@@ -249,6 +253,7 @@ def register_template_routes(
                 statuses=statuses,
                 segments=segments,
                 history_pagination=history_pagination,
+                hist_status=hist_status,
                 unsubscribe_pagination=unsubscribe_pagination,
                 bulk_exec_pagination=bulk_exec_pagination,
                 lead_pagination=lead_pagination,
