@@ -55,11 +55,11 @@ class EmailService:
     def _open_smtp_client(self, host, port, use_tls):
         # Common provider pattern: port 465 expects implicit SSL, while 587 uses STARTTLS.
         if use_tls and int(port) == 465:
-            smtp = smtplib.SMTP_SSL(host, port, timeout=20)
+            smtp = smtplib.SMTP_SSL(host, port, timeout=60)
             smtp.ehlo()
             return smtp
 
-        smtp = smtplib.SMTP(host, port, timeout=20)
+        smtp = smtplib.SMTP(host, port, timeout=60)
         smtp.ehlo()
         if use_tls:
             smtp.starttls()
