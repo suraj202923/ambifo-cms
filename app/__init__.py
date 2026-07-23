@@ -14,6 +14,7 @@ from werkzeug.utils import secure_filename
 from config import Config
 from app.models import Customer, OpportunityUpdateTag, User, db
 from app.routes import crm_bp, ensure_default_system_email_templates
+from app.services.email_queue import start_email_queue_worker
 
 
 login_manager = LoginManager()
@@ -240,6 +241,8 @@ def _ensure_runtime_schema_updates():
         customer_col = email_log_columns.get("customer_id")
         if customer_col and customer_col.get("nullable") is False:
             db.session.execute(text("ALTER TABLE email_logs ALTER COLUMN customer_id DROP NOT NULL"))
+        if "queue_status" not in email_log_columns:
+            db.session.execute(text("ALTER TABLE email_logs ADD COLUMN queue_status VARCHAR(20) NOT NULL DEFAULT 'immediate'"))
 
     if "email_unsubscribes" not in existing_tables:
         db.session.execute(text(
@@ -559,6 +562,8 @@ def create_app():
     db_ready, db_error = _bootstrap_database(app)
     if not db_ready:
         raise RuntimeError(f"Database bootstrap failed: {db_error}")
+
+    start_email_queue_worker(app)
 
     app.register_blueprint(crm_bp)
 

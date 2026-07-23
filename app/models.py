@@ -69,6 +69,7 @@ class EmailLog(db.Model):
     subject = db.Column(db.String(255), nullable=False)
     body = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(40), nullable=False)
+    queue_status = db.Column(db.String(20), nullable=False, default="immediate")
     error_message = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 

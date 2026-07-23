@@ -244,3 +244,19 @@ def register_email_routes(
         else:
             flash(f"Resend failed: {result.error}", "error")
         return redirect(url_for("crm.template_list") + "#email-history")
+
+    @bp.route("/api/email-queue-status")
+    @login_required
+    def email_queue_status():
+        records = (
+            EmailLog.query
+            .filter(EmailLog.queue_status.in_(["queued", "processing", "sent", "failed"]))
+            .order_by(EmailLog.created_at.desc())
+            .limit(100)
+            .all()
+        )
+        result = []
+        for r in records:
+            result.append({"id": r.id, "queue_status": r.queue_status, "status": r.status})
+        queued = sum(1 for r in records if r.queue_status in ("queued", "processing"))
+        return jsonify(queued=queued, records=result)

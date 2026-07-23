@@ -31,6 +31,7 @@ from app.models import (
     db,
 )
 from app.services.email_service import EmailService
+from app.services.email_queue import wake_queue_worker
 from app.services.macro_service import render_macros
 
 try:
@@ -349,8 +350,6 @@ def register_template_routes(
                         subj = custom_subject
                         body = custom_body
                         tpl_id_log = None
-                    svc = EmailService(current_app)
-                    res = svc.send_html_email(customer.email, subj, body)
                     db.session.add(EmailLog(
                         customer_id=customer.id,
                         template_id=tpl_id_log,
@@ -358,19 +357,10 @@ def register_template_routes(
                         email_type="custom",
                         subject=subj,
                         body=body,
-                        status=res.status,
-                        error_message=res.error,
+                        status="queued",
+                        queue_status="queued",
                     ))
-                    log_opportunity_history(
-                        customer.id,
-                        action="email-sent",
-                        changes_summary=(
-                            f"Email processed to {customer.email}. Source: {'template' if use_template else 'custom'} | "
-                            f"Subject: {subj} | Status: {res.status}."
-                        ),
-                        tag_name="email",
-                    )
-                    return res
+                    return True
 
                 def _send_to_address(email_addr, subj, body):
                     svc = EmailService(current_app)
@@ -387,7 +377,7 @@ def register_template_routes(
                     ))
                     return res
 
-                sent = failed = 0
+                sent = 0
 
                 if recipient_mode == "status":
                     status_name = (request.form.get("filter_status") or "").strip()
@@ -400,13 +390,11 @@ def register_template_routes(
                         Customer.email != "",
                     ).all()
                     for c in recipients:
-                        r = _send_to_customer(c)
-                        if r.success or r.status == "dev-mode":
-                            sent += 1
-                        else:
-                            failed += 1
+                        _send_to_customer(c)
+                        sent += 1
                     db.session.commit()
-                    flash(f"Status '{status_name}': {sent} sent, {failed} failed.", "success" if not failed else "error")
+                    wake_queue_worker()
+                    flash(f"Status '{status_name}': {sent} emails queued for sending.", "success")
 
                 elif recipient_mode == "segment":
                     segment_name = (request.form.get("filter_segment") or "").strip()
@@ -419,13 +407,11 @@ def register_template_routes(
                         Customer.email != "",
                     ).all()
                     for c in recipients:
-                        r = _send_to_customer(c)
-                        if r.success or r.status == "dev-mode":
-                            sent += 1
-                        else:
-                            failed += 1
+                        _send_to_customer(c)
+                        sent += 1
                     db.session.commit()
-                    flash(f"Segment '{segment_name}': {sent} sent, {failed} failed.", "success" if not failed else "error")
+                    wake_queue_worker()
+                    flash(f"Segment '{segment_name}': {sent} emails queued for sending.", "success")
 
                 elif recipient_mode == "select":
                     customer_ids = request.form.getlist("selected_customers")
@@ -435,13 +421,11 @@ def register_template_routes(
                     for cid in customer_ids:
                         c = Customer.query.get(int(cid))
                         if c and c.email:
-                            r = _send_to_customer(c)
-                            if r.success or r.status == "dev-mode":
-                                sent += 1
-                            else:
-                                failed += 1
+                            _send_to_customer(c)
+                            sent += 1
                     db.session.commit()
-                    flash(f"Selected customers: {sent} sent, {failed} failed.", "success" if not failed else "error")
+                    wake_queue_worker()
+                    flash(f"Selected customers: {sent} emails queued for sending.", "success")
 
                 elif recipient_mode == "manual_email":
                     manual_email = (request.form.get("manual_email") or "").strip()
@@ -484,9 +468,7 @@ def register_template_routes(
                     flash("Select a valid template.", "error")
                     return redirect(url_for("crm.template_list") + "#send-bulk")
                 all_customers = Customer.query.filter(Customer.email.isnot(None), Customer.email != "").all()
-                sent = 0
-                failed = 0
-                email_service = EmailService(current_app)
+                queued = 0
                 for customer in all_customers:
                     macro_values = build_template_macro_values_for_customer(
                         customer,
@@ -495,7 +477,6 @@ def register_template_routes(
                     )
                     rendered_subject = render_macros(template.subject_template, macro_values)
                     rendered_body = render_macros(template.body_template, macro_values)
-                    result = email_service.send_html_email(customer.email, rendered_subject, rendered_body)
                     db.session.add(EmailLog(
                         customer_id=customer.id,
                         template_id=template.id,
@@ -503,24 +484,13 @@ def register_template_routes(
                         email_type="bulk",
                         subject=rendered_subject,
                         body=rendered_body,
-                        status=result.status,
-                        error_message=result.error,
+                        status="queued",
+                        queue_status="queued",
                     ))
-                    log_opportunity_history(
-                        customer.id,
-                        action="bulk-email-sent",
-                        changes_summary=(
-                            f"Bulk email processed to {customer.email}. Template: {template.name} | "
-                            f"Subject: {rendered_subject} | Status: {result.status}."
-                        ),
-                        tag_name="email",
-                    )
-                    if result.success or result.status == "dev-mode":
-                        sent += 1
-                    else:
-                        failed += 1
+                    queued += 1
                 db.session.commit()
-                flash(f"Bulk email done: {sent} sent, {failed} failed.", "success" if not failed else "error")
+                wake_queue_worker()
+                flash(f"Bulk email queued: {queued} emails will be sent shortly.", "success")
                 return redirect(url_for("crm.template_list") + "#send-bulk")
 
             elif action == "send_bulk_csv":
@@ -638,15 +608,13 @@ def register_template_routes(
                     flash("No sendable emails left after unsubscribe + MX validation. Download bad email log for details.", "error")
                     return redirect(url_for("crm.template_list") + "#bulk-csv-history")
 
-                email_service = EmailService(current_app)
-                sent = failed = 0
+                queued = 0
                 success_lines = [f"Bulk CSV Execution: {execution_token}", f"Template: {template.name}", ""]
                 for idx, recipient, row in mx_valid_rows:
                     mv = {k: (row.get(k) or "").strip() for k in csv_headers}
                     mv["today"] = datetime.utcnow().date().isoformat()
                     rendered_subject = render_macros(template.subject_template, mv)
                     rendered_body = render_macros(template.body_template, mv)
-                    result = email_service.send_html_email(recipient, rendered_subject, rendered_body)
                     db.session.add(EmailLog(
                         customer_id=None,
                         template_id=template.id,
@@ -654,15 +622,11 @@ def register_template_routes(
                         email_type="csv-bulk",
                         subject=rendered_subject,
                         body=rendered_body,
-                        status=result.status,
-                        error_message=result.error,
+                        status="queued",
+                        queue_status="queued",
                     ))
-                    if result.success or result.status == "dev-mode":
-                        sent += 1
-                        success_lines.append(f"Row {idx}: SENT({result.status}) -> {recipient}")
-                    else:
-                        failed += 1
-                        bad_lines.append(f"Row {idx}: SEND_FAILED({result.status}) -> {recipient} | {result.error or '-'}")
+                    queued += 1
+                    success_lines.append(f"Row {idx}: QUEUED -> {recipient}")
 
                 bad_log_path.write_text("\n".join(bad_lines) + "\n", encoding="utf-8")
                 success_log_path.write_text("\n".join(success_lines) + "\n", encoding="utf-8")
@@ -675,17 +639,18 @@ def register_template_routes(
                     total_rows=len(csv_rows),
                     unsubscribed_rows=unsubscribed_rows,
                     invalid_rows=max(0, len(csv_rows) - len(mx_valid_rows)),
-                    sent_rows=sent,
-                    failed_rows=failed,
+                    sent_rows=queued,
+                    failed_rows=0,
                 )
                 db.session.add(execution)
                 db.session.commit()
+                wake_queue_worker()
                 msg = (
-                    f"CSV bulk execution completed. Total rows: {len(csv_rows)}, sent: {sent}, failed: {failed}, "
+                    f"CSV bulk emails queued. Total rows: {len(csv_rows)}, queued: {queued}, "
                     f"unsubscribed removed: {unsubscribed_rows}, excluded (invalid/no-mx/unsubscribed): {max(0, len(csv_rows) - len(mx_valid_rows))}, "
-                    f"leads imported/updated: {lead_imported}."
+                    f"leads imported/updated: {lead_imported}. Emails will be sent shortly."
                 )
-                flash(msg, "success" if not failed else "error")
+                flash(msg, "success")
                 return redirect(url_for("crm.template_list") + "#bulk-csv-history")
 
             elif action == "upload_leads_csv":
@@ -808,15 +773,11 @@ def register_template_routes(
                     flash("No leads found for selected filter.", "error")
                     return redirect(url_for("crm.template_list") + "#send-lead-bulk")
 
-                sent = failed = 0
-                email_service = EmailService(current_app)
+                queued = 0
                 for lead in leads:
                     macro_values = lead_macro_values(lead)
                     rendered_subject = render_macros(template.subject_template, macro_values)
                     rendered_body = render_macros(template.body_template, macro_values)
-                    result = email_service.send_html_email(lead.email, rendered_subject, rendered_body)
-                    lead.last_emailed_at = datetime.utcnow()
-                    lead.last_email_status = result.status
                     db.session.add(EmailLog(
                         customer_id=None,
                         template_id=template.id,
@@ -824,15 +785,15 @@ def register_template_routes(
                         email_type="lead-bulk",
                         subject=rendered_subject,
                         body=rendered_body,
-                        status=result.status,
-                        error_message=result.error,
+                        status="queued",
+                        queue_status="queued",
                     ))
-                    if result.success or result.status == "dev-mode":
-                        sent += 1
-                    else:
-                        failed += 1
+                    lead.last_emailed_at = datetime.utcnow()
+                    lead.last_email_status = "queued"
+                    queued += 1
                 db.session.commit()
-                flash(f"Lead promotional bulk email done: {sent} sent, {failed} failed.", "success" if not failed else "error")
+                wake_queue_worker()
+                flash(f"Lead promotional bulk email queued: {queued} emails will be sent shortly.", "success")
                 return redirect(url_for("crm.template_list") + "#send-lead-bulk")
 
             return redirect(url_for("crm.template_list"))

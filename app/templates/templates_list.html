@@ -351,30 +351,52 @@
                 <th>Template</th>
                 <th>Subject</th>
                 <th>Type</th>
+                <th>Queue</th>
                 <th>Status</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
             {% for log in history_pagination.items %}
-              <tr>
+              <tr data-log-id="{{ log.id }}">
                 <td data-label="Date" style="white-space:nowrap;">{{ log.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                 <td data-label="Customer">{% if log.customer %}{{ log.customer.customer_name }}{% else %}<span class="hint-inline">-</span>{% endif %}</td>
                 <td data-label="Recipient">{{ log.recipient_email or (log.customer.email if log.customer else '-') }}</td>
                 <td data-label="Template">{% if log.template %}{{ log.template.name }}{% else %}<span class="badge-custom">Custom Email</span>{% endif %}</td>
                 <td data-label="Subject">{{ log.subject }}</td>
                 <td data-label="Type"><span class="badge-type badge-type-{{ log.email_type }}">{{ log.email_type | title }}</span></td>
+                <td data-label="Queue">
+                  <span class="queue-badge" data-queue-status="{{ log.queue_status }}">
+                    {% if log.queue_status == 'queued' %}
+                      <span class="badge-status badge-queued">Queued</span>
+                    {% elif log.queue_status == 'processing' %}
+                      <span class="badge-status badge-processing">Processing</span>
+                    {% elif log.queue_status == 'sent' %}
+                      <span class="badge-status badge-ok">Sent</span>
+                    {% elif log.queue_status == 'failed' %}
+                      <span class="badge-status badge-fail">Failed</span>
+                    {% else %}
+                      <span class="badge-status badge-ok">{{ log.queue_status | title }}</span>
+                    {% endif %}
+                  </span>
+                </td>
                 <td data-label="Status">
-                  {% if log.status in ('sent', 'dev-mode') %}
-                    <span class="badge-status badge-ok">OK {{ log.status }}</span>
-                  {% else %}
-                    <span class="badge-status badge-fail" title="{{ log.error_message or '' }}">FAIL {{ log.status }}</span>
-                  {% endif %}
+                  <span class="status-badge" data-send-status="{{ log.status }}">
+                    {% if log.status in ('sent', 'dev-mode') %}
+                      <span class="badge-status badge-ok">OK {{ log.status }}</span>
+                    {% elif log.status == 'queued' %}
+                      <span class="badge-status badge-queued">Queued</span>
+                    {% else %}
+                      <span class="badge-status badge-fail" title="{{ log.error_message or '' }}">FAIL {{ log.status }}</span>
+                    {% endif %}
+                  </span>
                 </td>
                 <td data-label="Action">
+                  {% if log.queue_status not in ('queued', 'processing') %}
                   <form method="post" action="{{ url_for('crm.email_resend', log_id=log.id) }}">
                     <button class="mini-btn" type="submit" title="Resend">Resend</button>
                   </form>
+                  {% endif %}
                 </td>
               </tr>
             {% endfor %}
@@ -720,5 +742,61 @@
     };
     reader.readAsText(input.files[0]);
   }
+
+  function queueBadgeHtml(status) {
+    var map = {
+      queued: '<span class="badge-status badge-queued">Queued</span>',
+      processing: '<span class="badge-status badge-processing">Processing</span>',
+      sent: '<span class="badge-status badge-ok">Sent</span>',
+      failed: '<span class="badge-status badge-fail">Failed</span>'
+    };
+    return map[status] || '<span class="badge-status badge-ok">' + status + '</span>';
+  }
+
+  function statusBadgeHtml(status) {
+    if (status === 'sent' || status === 'dev-mode') {
+      return '<span class="badge-status badge-ok">OK ' + status + '</span>';
+    } else if (status === 'queued') {
+      return '<span class="badge-status badge-queued">Queued</span>';
+    } else {
+      return '<span class="badge-status badge-fail">FAIL ' + status + '</span>';
+    }
+  }
+
+  var _pollActive = false;
+
+  function pollQueueStatus() {
+    fetch('/api/email-queue-status')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.records && data.records.length > 0) {
+          _pollActive = true;
+          data.records.forEach(function(rec) {
+            var row = document.querySelector('tr[data-log-id="' + rec.id + '"]');
+            if (!row) return;
+            var qBadge = row.querySelector('.queue-badge');
+            if (qBadge && qBadge.getAttribute('data-queue-status') !== rec.queue_status) {
+              qBadge.setAttribute('data-queue-status', rec.queue_status);
+              qBadge.innerHTML = queueBadgeHtml(rec.queue_status);
+            }
+            var sBadge = row.querySelector('.status-badge');
+            if (sBadge && sBadge.getAttribute('data-send-status') !== rec.status) {
+              sBadge.setAttribute('data-send-status', rec.status);
+              sBadge.innerHTML = statusBadgeHtml(rec.status);
+            }
+          });
+        }
+        if (data.queued > 0 || _pollActive) {
+          setTimeout(pollQueueStatus, 1000);
+        } else {
+          _pollActive = false;
+        }
+      })
+      .catch(function() {
+        setTimeout(pollQueueStatus, 2000);
+      });
+  }
+
+  setTimeout(pollQueueStatus, 1000);
 </script>
 {% endblock %}

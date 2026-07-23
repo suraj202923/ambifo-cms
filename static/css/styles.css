@@ -1863,6 +1863,16 @@ code {
   cursor: help;
 }
 
+.badge-queued {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.badge-processing {
+  background: #cce5ff;
+  color: #004085;
+}
+
 .badge-custom {
   display: inline-block;
   padding: 0.18rem 0.45rem;
