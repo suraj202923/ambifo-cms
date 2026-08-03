@@ -49,7 +49,7 @@ def _run_queue_loop(app):
 
 
 def _process_next_queued_email(app):
-    from app.models import EmailLog, OpportunityHistory, db
+    from app.models import EmailLog, EmailBulkCsvExecution, OpportunityHistory, db
     from app.services.email_service import EmailService
 
     with app.app_context():
@@ -76,6 +76,10 @@ def _process_next_queued_email(app):
             if result.success or result.status == "dev-mode":
                 record.queue_status = "sent"
                 record.status = result.status
+            elif result.status == "unsubscribed":
+                record.queue_status = "failed"
+                record.status = "unsubscribed"
+                record.error_message = result.error
             else:
                 record.queue_status = "failed"
                 record.status = "failed"
@@ -85,6 +89,16 @@ def _process_next_queued_email(app):
             record.status = "failed"
             record.error_message = str(exc)
             logger.exception("Email queue: exception sending to %s", record.recipient_email)
+
+        if record.csv_execution_id:
+            execution = EmailBulkCsvExecution.query.get(record.csv_execution_id)
+            if execution:
+                if record.queue_status == "sent":
+                    execution.sent_rows = (execution.sent_rows or 0) + 1
+                elif record.status == "unsubscribed":
+                    execution.unsubscribed_rows = (execution.unsubscribed_rows or 0) + 1
+                else:
+                    execution.failed_rows = (execution.failed_rows or 0) + 1
 
         if record.customer_id:
             final_tag = "email"

@@ -245,6 +245,9 @@ def _ensure_runtime_schema_updates():
             db.session.execute(text("ALTER TABLE email_logs ADD COLUMN queue_status VARCHAR(20) NOT NULL DEFAULT 'immediate'"))
         if "retry_count" not in email_log_columns:
             db.session.execute(text("ALTER TABLE email_logs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0"))
+        if "csv_execution_id" not in email_log_columns:
+            db.session.execute(text("ALTER TABLE email_logs ADD COLUMN csv_execution_id INTEGER"))
+            db.session.execute(text("CREATE INDEX IF NOT EXISTS idx_email_logs_csv_execution_id ON email_logs (csv_execution_id)"))
 
     if "email_unsubscribes" not in existing_tables:
         db.session.execute(text(

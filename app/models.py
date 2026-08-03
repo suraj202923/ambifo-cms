@@ -72,10 +72,12 @@ class EmailLog(db.Model):
     queue_status = db.Column(db.String(20), nullable=False, default="immediate")
     error_message = db.Column(db.Text, nullable=True)
     retry_count = db.Column(db.Integer, nullable=False, default=0)
+    csv_execution_id = db.Column(db.Integer, db.ForeignKey("email_bulk_csv_executions.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     customer = db.relationship("Customer", backref="email_logs")
     template = db.relationship("EmailTemplate", backref="email_logs")
+    csv_execution = db.relationship("EmailBulkCsvExecution", backref="email_logs")
 
 
 class EmailUnsubscribe(db.Model):

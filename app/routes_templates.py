@@ -145,6 +145,28 @@ def register_template_routes(
 
         return send_file(file_path, as_attachment=True, download_name=file_path.name, mimetype="text/plain")
 
+    @bp.route("/api/bulk-csv-execution-status", methods=["GET"])
+    @login_required
+    def bulk_csv_execution_status():
+        ids_raw = (request.args.get("ids") or "").strip()
+        if not ids_raw:
+            return jsonify(success=True, data={})
+        exec_ids = [int(token) for token in ids_raw.split(",") if token.strip().isdigit()]
+        if not exec_ids:
+            return jsonify(success=True, data={})
+
+        results = {}
+        for exec_id in exec_ids:
+            execution = EmailBulkCsvExecution.query.get(exec_id)
+            if execution:
+                results[exec_id] = {
+                    "sent": execution.sent_rows or 0,
+                    "failed": execution.failed_rows or 0,
+                    "unsubscribed": execution.unsubscribed_rows or 0,
+                    "total": execution.total_rows or 0,
+                }
+        return jsonify(success=True, data=results)
+
     @bp.route("/leads/csv-sample")
     @login_required
     def leads_csv_sample():
@@ -604,7 +626,7 @@ def register_template_routes(
                         success_log_filename=success_log_filename,
                         total_rows=len(csv_rows),
                         unsubscribed_rows=unsubscribed_rows,
-                        invalid_rows=len(csv_rows),
+                        invalid_rows=max(0, len(csv_rows) - unsubscribed_rows),
                         sent_rows=0,
                         failed_rows=0,
                     )
@@ -612,6 +634,20 @@ def register_template_routes(
                     db.session.commit()
                     flash("No sendable emails left after unsubscribe + MX validation. Download bad email log for details.", "error")
                     return redirect(url_for("crm.template_list") + "#bulk-csv-history")
+
+                execution = EmailBulkCsvExecution(
+                    template_id=template.id,
+                    uploaded_filename=original_filename,
+                    bad_log_filename=bad_log_filename,
+                    success_log_filename=success_log_filename,
+                    total_rows=len(csv_rows),
+                    unsubscribed_rows=unsubscribed_rows,
+                    invalid_rows=max(0, len(csv_rows) - len(mx_valid_rows) - unsubscribed_rows),
+                    sent_rows=0,
+                    failed_rows=0,
+                )
+                db.session.add(execution)
+                db.session.flush()
 
                 queued = 0
                 success_lines = [f"Bulk CSV Execution: {execution_token}", f"Template: {template.name}", ""]
@@ -629,6 +665,7 @@ def register_template_routes(
                         body=rendered_body,
                         status="queued",
                         queue_status="queued",
+                        csv_execution_id=execution.id,
                     ))
                     queued += 1
                     success_lines.append(f"Row {idx}: QUEUED -> {recipient}")
@@ -636,18 +673,6 @@ def register_template_routes(
                 bad_log_path.write_text("\n".join(bad_lines) + "\n", encoding="utf-8")
                 success_log_path.write_text("\n".join(success_lines) + "\n", encoding="utf-8")
 
-                execution = EmailBulkCsvExecution(
-                    template_id=template.id,
-                    uploaded_filename=original_filename,
-                    bad_log_filename=bad_log_filename,
-                    success_log_filename=success_log_filename,
-                    total_rows=len(csv_rows),
-                    unsubscribed_rows=unsubscribed_rows,
-                    invalid_rows=max(0, len(csv_rows) - len(mx_valid_rows)),
-                    sent_rows=queued,
-                    failed_rows=0,
-                )
-                db.session.add(execution)
                 db.session.commit()
                 wake_queue_worker()
                 msg = (

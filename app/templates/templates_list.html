@@ -466,9 +466,9 @@
                 <td data-label="Template">{{ row.template.name if row.template else '-' }}</td>
                 <td data-label="CSV File">{{ row.uploaded_filename }}</td>
                 <td data-label="Total Rows">{{ row.total_rows }}</td>
-                <td data-label="Sent">{{ row.sent_rows }}</td>
-                <td data-label="Failed">{{ row.failed_rows }}</td>
-                <td data-label="Unsubscribed">{{ row.unsubscribed_rows }}</td>
+                <td data-label="Sent" class="bulk-sent" data-exec-id="{{ row.id }}">{{ row.sent_rows }}</td>
+                <td data-label="Failed" class="bulk-failed" data-exec-id="{{ row.id }}">{{ row.failed_rows }}</td>
+                <td data-label="Unsubscribed" class="bulk-unsubscribed" data-exec-id="{{ row.id }}">{{ row.unsubscribed_rows }}</td>
                 <td data-label="Excluded">{{ row.invalid_rows }}</td>
                 <td data-label="Logs" style="white-space:nowrap;">
                   <a class="mini-btn" href="{{ url_for('crm.template_csv_execution_download', execution_id=row.id, kind='bad') }}">Bad TXT</a>
@@ -817,5 +817,41 @@
   }
 
   setTimeout(pollQueueStatus, 1000);
+
+  function pollBulkCsvCounts() {
+    var sentCells = document.querySelectorAll('#bulk-csv-history .bulk-sent');
+    var ids = [];
+    var seen = {};
+    for (var i = 0; i < sentCells.length; i++) {
+      var execId = sentCells[i].getAttribute('data-exec-id');
+      if (execId && !seen[execId]) {
+        seen[execId] = true;
+        ids.push(execId);
+      }
+    }
+    if (ids.length === 0) return;
+    fetch('/api/bulk-csv-execution-status?ids=' + ids.join(','))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data && data.data) {
+          for (var id in data.data) {
+            if (!data.data.hasOwnProperty(id)) continue;
+            var rec = data.data[id];
+            var sentCell = document.querySelector('#bulk-csv-history .bulk-sent[data-exec-id="' + id + '"]');
+            var failedCell = document.querySelector('#bulk-csv-history .bulk-failed[data-exec-id="' + id + '"]');
+            var unsubCell = document.querySelector('#bulk-csv-history .bulk-unsubscribed[data-exec-id="' + id + '"]');
+            if (sentCell) sentCell.textContent = rec.sent;
+            if (failedCell) failedCell.textContent = rec.failed;
+            if (unsubCell) unsubCell.textContent = rec.unsubscribed;
+          }
+        }
+      })
+      .catch(function() {})
+      .then(function() {
+        setTimeout(pollBulkCsvCounts, 3000);
+      });
+  }
+
+  setTimeout(pollBulkCsvCounts, 3000);
 </script>
 {% endblock %}
