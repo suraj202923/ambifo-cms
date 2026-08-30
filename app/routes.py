@@ -835,7 +835,7 @@ def _sanitize_email_template_body(body_html):
         "support@ambifo.com",
         "https://ambifo.com",
         "www.linkedin.com/company/ambifo-technology",
-        "+91 9148419502",
+        "+91 9827135213",
         "Building No 674",
     ]
     for token in footer_tokens:
@@ -1047,7 +1047,7 @@ def _get_sow_brand_config():
         "tagline_chips": SystemSetting.get_value("sow.brand.tagline_chips", "Cloud Strategy,Migration & Modernization,DevOps,AI/ML"),
         "website":       SystemSetting.get_value("sow.brand.website",       "www.ambifo.com"),
         "email":         SystemSetting.get_value("sow.brand.email",         "support@ambifo.com"),
-        "phone":         SystemSetting.get_value("sow.brand.phone",         "+91 9148419502"),
+        "phone":         SystemSetting.get_value("sow.brand.phone",         "+91 9827135213"),
         "address":       SystemSetting.get_value("sow.brand.address",       "Building No 674, 18th Main, 3rd Phase, Domlur, Bangalore - 560071"),
         "confidential":  SystemSetting.get_value("sow.brand.confidential",  "⚠ CONFIDENTIAL — Intended solely for the named addressee"),
         "header_top_px": _int_setting("sow.brand.header_top_px", 122),
@@ -1279,7 +1279,7 @@ def _render_sow_template_for_customer(template_html, customer, selected_diagrams
         "{{ambifo_locations}}": "Bangalore | Mumbai | Delhi",
         "{{ambifo_website}}": "www.ambifo.com",
         "{{ambifo_support_email}}": "support@ambifo.com",
-        "{{ambifo_support_phone}}": "+91 9148419502",
+        "{{ambifo_support_phone}}": "+91 9827135213",
         "{{ambifo_address}}": "Building No 674, 18th Main, 3rd Phase, Front of New Land ISRO Quarter, Domlur, Bangalore - 560071",
         "{{ambifo_linkedin}}": "https://www.linkedin.com/company/ambifo-technology",
     }
@@ -1464,7 +1464,7 @@ def _generate_sow_docx(customer, sow_title, sow_date, sow_version, content_html,
         ("Cloud Platform:", customer.cloud or "AWS / Azure"),
         ("Website:", "www.ambifo.com"),
         ("Support Email:", "support@ambifo.com"),
-        ("Support Phone:", "+91 9148419502"),
+        ("Support Phone:", "+91 9827135213"),
         ("Address:", "Building No 674, 18th Main, 3rd Phase, Front of New Land ISRO Quarter, Domlur, Bangalore - 560071"),
         ("LinkedIn:", "https://www.linkedin.com/company/ambifo-technology"),
     ]
@@ -1485,7 +1485,7 @@ def _generate_sow_docx(customer, sow_title, sow_date, sow_version, content_html,
     footer_run = footer_p.add_run(
         "CONFIDENTIAL — This document and any attachments are confidential and intended solely "
         "for the use of the individual or entity to which it is addressed. "
-        "Ambifo Technology Pvt Ltd | support@ambifo.com | www.ambifo.com | +91 9148419502"
+        "Ambifo Technology Pvt Ltd | support@ambifo.com | www.ambifo.com | +91 9827135213"
     )
     footer_run.italic = True
     footer_run.font.size = Pt(8)
@@ -1568,7 +1568,7 @@ def _generate_sow_pdf(customer, sow_title, sow_date, sow_version, content_html, 
         f"Cloud Platform: {_normalize_text(customer.cloud) or 'AWS / Azure'}",
         "Website: www.ambifo.com",
         "Support Email: support@ambifo.com",
-        "Support Phone: +91 9148419502",
+        "Support Phone: +91 9827135213",
     ]
     for ln in info_lines:
         _draw_wrapped(ln, "Helvetica", 10, 14)

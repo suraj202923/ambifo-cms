@@ -192,7 +192,7 @@ class EmailService:
             <td style=\"padding:16px 20px;border-top:1px solid #edf2f7;background:#fbfcfe;font-size:13px;line-height:1.75;color:#1f2937;\">
                 <div><strong>Website:</strong> <a href=\"https://www.ambifo.com\" style=\"color:#0f4fa8;text-decoration:none;\">www.ambifo.com</a></div>
                 <div><strong>Email:</strong> <a href=\"mailto:support@ambifo.com\" style=\"color:#0f4fa8;text-decoration:none;\">support@ambifo.com</a></div>
-                <div><strong>Phone:</strong> +91 9148419502</div>
+                <div><strong>Phone:</strong> +91 9827135213</div>
                 <div><strong>Address:</strong> {escape(company_address)}</div>
                 <div style=\"margin-top:8px;\">
                     <a href=\"{escape(linkedin_url)}\" target=\"_blank\" rel=\"noopener\" title=\"LinkedIn\" aria-label=\"LinkedIn\" style=\"display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:#0a66c2;color:#ffffff;text-decoration:none;font-weight:700;font-size:13px;line-height:1;\">in</a>
