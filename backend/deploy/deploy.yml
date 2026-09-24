@@ -1,0 +1,1005 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  Ambifo CRM v1 — AWS EC2 Deployment Playbook (Ansible)                    ║
+# ║                                                                           ║
+# ║  Deploys the three-tier stack on a single Ubuntu 24.04 EC2 instance:      ║
+# ║    · Backend  : FastAPI (uvicorn)           -> 127.0.0.1:8000             ║
+# ║    · Engine   : Rust (Axum)                 -> 127.0.0.1:8081             ║
+# ║    · Worker   : Email polling worker        (run_worker.py)               ║
+# ║    · Frontend : React build served by nginx -> https://<domain>          ║
+# ║    · Database : PostgreSQL on the same instance (EBS persists data)       ║
+# ║    · TLS      : Let's Encrypt (certbot, webroot, auto-renewal timer)      ║
+# ║    · Backup   : daily pg_dump systemd timer (+ optional S3 upload)        ║
+# ║                                                                           ║
+# ║  Run (from any machine with ansible + community.general):                 ║
+# ║    ansible-galaxy collection install community.general                    ║
+# ║    ansible-playbook -i hosts.ini deploy.yml \                             ║
+# ║      -e git_repo_url=https://github.com/you/ambifo-crm-v1 \               ║
+# ║      -e domain_name=crm.example.com \                                     ║
+# ║      -e letsencrypt_email=you@example.com \                               ║
+# ║      -e app_secret_key=<long-random> \                                    ║
+# ║      -e db_password=<db-pass> -e admin_password=<admin-pass> \            ║
+# ║      -e postgres_password=<postgres-superuser-pass>                       ║
+# ║                                                                           ║
+# ║  ── AWS prerequisites (do these once, by hand) ─────────────────────────  ║
+# ║   1. Launch   : Ubuntu 24.04 LTS (t3.medium / t4g.medium recommend ≥4 GB  ║
+# ║                 RAM; the playbook also creates a 2 GB swapfile).          ║
+# ║   2. Key pair : create one, save the .pem, add it to the SSH agent or     ║
+# ║                 use  -e ansible_ssh_private_key_file=/path/key.pem.       ║
+# ║   3. Security group: allow inbound  22 (SSH), 80, 443 (web).              ║
+# ║   4. Elastic IP: allocate one, associate it with the instance.            ║
+# ║   5. DNS      : point an A record for <domain_name> at the Elastic IP.    ║
+# ║                 HTTP-01 challenge needs 80 reachable BEFORE first run.    ║
+# ║   6. Remote   : override ansible_user (default ubuntu) in hosts.ini.      ║
+# ║                                                                           ║
+# ║  ── Repo prerequisites ───────────────────────────────────────────────────  ║
+# ║   · The repo must be committed and pushed to a host Ansible can reach     ║
+# ║     (git_repo_url). Private repo -> SSH URL + git_ssh_key extra-var, or   ║
+# ║     https://github.com/<you>/<repo> for a public repo.                    ║
+# ║   · frontend/package.json + package-lock.json must be in sync: the build  ║
+# ║     uses `npm ci` (deliberate, immutable).                                ║
+# ║                                                                           ║
+# ║  ── Notes ───────────────────────────────────────────────────────────────  ║
+# ║   · First run is slow: pip deps + a release Rust build (minutes). After-  ║
+# ║     wards the playbook is incremental / idempotent and can be re-run to   ║
+# ║     pull the latest code (git pull) and restart services.                 ║
+# ║   · SMTP is optional and editable later on the in-app Settings page.      ║
+# ║   · To front the site with Cloudflare later, disable its proxy ("grey     ║
+# ║     cloud") or switch the DNS record — certbot handles TLS on EC2.        ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+- name: Deploy Ambifo CRM v1 on AWS EC2 (Ubuntu)
+  hosts: ambifo_server
+  become: true
+  gather_facts: true
+
+  vars:
+    # ── identity / paths ─────────────────────────────────────────
+    app_user: ambifo
+    app_group: www-data
+    repo_dir: /opt/ambifocms
+    backend_dir: "{{ repo_dir }}/backend"
+    frontend_dir: "{{ repo_dir }}/frontend"
+    engine_dir: "{{ backend_dir }}/engine"
+    engine_binary: "{{ engine_dir }}/target/release/ambifo_engine"
+    venv_dir: "{{ backend_dir }}/.venv"
+    www_dir: /var/www/ambifo
+    log_dir: /var/log/ambifo
+    backup_dir: /var/backups/ambifo
+    backup_script: /usr/local/sbin/ambifo-backup.sh
+
+    # ── git ──────────────────────────────────────────────────────
+    git_repo_url: ~                 # REQUIRED (https or git@ssh URL)
+    git_branch: main
+    git_ssh_key: ~                  # optional: private-repo deploy key (raw PEM)
+
+    # ── domain / app ─────────────────────────────────────────────
+    domain_name: ~                  # REQUIRED (e.g. crm.example.com)
+    api_host: 127.0.0.1
+    api_port: 8000
+    api_workers: 1                  # advisory-locked startup allows >1 safely
+    engine_port: 8081
+    app_secret_key: ~               # REQUIRED — long random string
+    admin_username: admin
+    admin_password: ~               # REQUIRED (default admin login)
+    app_base_url: "https://{{ domain_name }}"
+    vite_api_url: "https://{{ domain_name }}"
+    cors_origins: "https://{{ domain_name }}"
+
+    # ── TLS (Let's Encrypt) ──────────────────────────────────────
+    letsencrypt_email: ~            # REQUIRED — cert renewal notices
+
+    # ── database ─────────────────────────────────────────────────
+    postgres_password: ~            # REQUIRED — postgres superuser password
+    db_host: localhost
+    db_port: 5432
+    db_name: ambifocrm
+    db_user: ambifo_app
+    db_password: ~                  # REQUIRED
+    database_url: "postgresql+psycopg2://{{ db_user }}:{{ db_password }}@{{ db_host }}:{{ db_port }}/{{ db_name }}"
+
+    # ── SMTP (optional — also editable in-app on the Settings page)
+    smtp_host: ""
+    smtp_port: 587
+    smtp_username: ""
+    smtp_password: ""
+    smtp_use_tls: "true"
+    smtp_mail_from: "noreply@ambifo.com"
+
+    # ── feature toggles ──────────────────────────────────────────
+    install_playwright: true        # AWS-calculator CSV/PDF sync (non-fatal)
+    ensure_swap: true               # 2 GB swapfile (Rust build can OOM 2 GB VMs)
+    swap_size_mb: 2048
+    enable_ufw: true                # AWS SG is primary; UFW is defence-in-depth
+    enable_backup: true             # daily pg_dump timer
+    backup_retention_days: 14
+    backup_s3_bucket: ""            # optional: s3://<bucket> for offsite copies
+
+  # ─────────────────────────────────────────────────────────────
+  tasks:
+
+    # ── 0. Preflight: required variables ─────────────────────────
+    - name: Fail if required variables are missing
+      ansible.builtin.fail:
+        msg: >
+          Required var not set: "{{ item }}".
+          Pass it with: -e {{ item }}=<value>
+      when: item.value is not defined or not item.value
+      loop:
+        - { name: git_repo_url, value: "{{ git_repo_url | default('') }}" }
+        - { name: domain_name, value: "{{ domain_name | default('') }}" }
+        - { name: app_secret_key, value: "{{ app_secret_key | default('') }}" }
+        - { name: admin_password, value: "{{ admin_password | default('') }}" }
+        - { name: letsencrypt_email, value: "{{ letsencrypt_email | default('') }}" }
+        - { name: db_password, value: "{{ db_password | default('') }}" }
+        - { name: postgres_password, value: "{{ postgres_password | default('') }}" }
+
+    # ── 1. Swapfile (avoid OOM during the Rust release build) ─────
+    - name: Check current swap usage
+      ansible.builtin.command: swapon --show --noheadings
+      changed_when: false
+      register: swap_now
+      when: ensure_swap
+
+    - name: Create swapfile
+      ansible.builtin.command: "fallocate -l {{ swap_size_mb }}M /swapfile"
+      args:
+        creates: /swapfile
+      when: ensure_swap and not swap_now.stdout_lines
+
+    - name: Secure swapfile permissions
+      ansible.builtin.file:
+        path: /swapfile
+        mode: "0600"
+      when: ensure_swap
+
+    - name: Format swapfile
+      ansible.builtin.command: mkswap /swapfile
+      when: ensure_swap and not swap_now.stdout_lines
+
+    - name: Enable swapfile
+      ansible.builtin.command: swapon /swapfile
+      when: ensure_swap and not swap_now.stdout_lines
+
+    - name: Persist swapfile in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "/swapfile none swap sw 0 0"
+        create: true
+      when: ensure_swap
+
+    # ── 2. System packages ───────────────────────────────────────
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install system dependencies
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-venv
+          - python3-pip
+          - build-essential
+          - libpq-dev
+          - git
+          - nginx
+          - postgresql
+          - postgresql-contrib
+          - certbot
+          - ufw
+          - curl
+          - jq
+          - ca-certificates
+          - gnupg
+        state: present
+
+    # ── 2b. Node.js (Vite 8 requires Node >= 22.12) ──────────────
+    - name: Create apt keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Add NodeSource GPG key
+      ansible.builtin.get_url:
+        url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+        dest: /etc/apt/keyrings/nodesource.asc
+        mode: "0644"
+
+    - name: Add NodeSource repository (Node 22)
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x {{ ansible_distribution_release }} main"
+        state: present
+
+    - name: Install Node.js
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+        update_cache: true
+
+    - name: Verify Node version meets Vite 8 requirement (>= 22.12)
+      ansible.builtin.command: node --version
+      changed_when: false
+      register: node_version
+
+    - name: Fail if Node is too old
+      ansible.builtin.fail:
+        msg: >
+          Installed Node {{ node_version.stdout }} is below 22.12.0 required by
+          Vite 8. NodeSource node_22.x should provide a newer minor — re-run.
+      when: node_version.stdout is version('v22.12.0', operator='lt')
+
+    # ── 3. App user ──────────────────────────────────────────────
+    - name: Create app user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        groups: "{{ app_group }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    # ── 4. Clone / update code ───────────────────────────────────
+    - name: Mark repo directory as trusted git safe.directory
+      ansible.builtin.shell: >
+        git config --global --get-all safe.directory | grep -Fx "{{ repo_dir }}"
+        || git config --global --add safe.directory "{{ repo_dir }}"
+      args:
+        executable: /bin/bash
+        become_user: "{{ app_user }}"
+      changed_when: false
+
+    - name: Install git SSH deploy key (optional, for private repos)
+      ansible.builtin.copy:
+        dest: "/home/{{ app_user }}/.ssh/id_ed25519"
+        content: "{{ git_ssh_key }}\n"
+        owner: "{{ app_user }}"
+        mode: "0600"
+      when: git_ssh_key is defined and git_ssh_key
+
+    - name: Clone repository (first run) or pull latest (re-runs)
+      ansible.builtin.git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ repo_dir }}"
+        version: "{{ git_branch }}"
+        force: true
+        update: true
+        accept_newhostkey: true
+      environment:
+        GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new{{ (' -i /home/' ~ app_user ~ '/.ssh/id_ed25519') if (git_ssh_key is defined and git_ssh_key) else '' }}"
+      notify:
+        - Restart ambifo-api
+        - Restart ambifo-engine
+        - Restart ambifo-worker
+
+    - name: Set repo ownership after clone
+      ansible.builtin.file:
+        path: "{{ repo_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        recurse: true
+
+    - name: Create storage directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0775"
+      loop:
+        - "{{ backend_dir }}/storage"
+        - "{{ backend_dir }}/storage/documents"
+        - "{{ backend_dir }}/storage/email_csv"
+
+    # ── 5. Python virtual environment ────────────────────────────
+    - name: Create virtual environment
+      ansible.builtin.command:
+        cmd: "python3 -m venv {{ venv_dir }}"
+        creates: "{{ venv_dir }}/bin/activate"
+
+    - name: Upgrade pip
+      ansible.builtin.pip:
+        name: pip
+        state: latest
+        virtualenv: "{{ venv_dir }}"
+
+    - name: Install Python requirements
+      ansible.builtin.pip:
+        requirements: "{{ backend_dir }}/requirements.txt"
+        virtualenv: "{{ venv_dir }}"
+      notify:
+        - Restart ambifo-api
+        - Restart ambifo-worker
+
+    - name: Install Playwright system dependencies
+      ansible.builtin.command:
+        cmd: "{{ venv_dir }}/bin/playwright install-deps chromium"
+        chdir: "{{ backend_dir }}"
+      when: install_playwright
+      changed_when: false
+      ignore_errors: true   # non-fatal: imports are lazy, feature degrades softly
+
+    - name: Install Playwright Chromium browser
+      ansible.builtin.command:
+        cmd: "{{ venv_dir }}/bin/playwright install chromium"
+        chdir: "{{ backend_dir }}"
+      become_user: "{{ app_user }}"
+      environment:
+        HOME: "/home/{{ app_user }}"
+      when: install_playwright
+      changed_when: false
+      ignore_errors: true   # non-fatal: imports are lazy, feature degrades softly
+
+    - name: Ensure ownership after venv / pip install
+      ansible.builtin.file:
+        path: "{{ repo_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        recurse: true
+
+    # ── 6. PostgreSQL setup (on-instance) ────────────────────────
+    # No Alembic needed: tables are auto-created on API startup via
+    # Base.metadata.create_all (guarded by a Postgres advisory lock).
+    - name: Ensure PostgreSQL is started
+      ansible.builtin.service:
+        name: postgresql
+        state: started
+        enabled: true
+
+    - name: Set postgres superuser password
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -c
+        "ALTER USER postgres WITH PASSWORD '{{ postgres_password }}';"
+      changed_when: false
+
+    - name: Create PostgreSQL role if missing
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -tAc "
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ db_user }}') THEN
+            CREATE ROLE {{ db_user }} LOGIN PASSWORD '{{ db_password }}';
+          END IF;
+        END
+        $$;"
+      changed_when: false
+
+    - name: Ensure PostgreSQL database exists
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -tAc
+        "SELECT 1 FROM pg_database WHERE datname='{{ db_name }}'"
+      register: db_exists_check
+      changed_when: false
+
+    - name: Create PostgreSQL database if missing
+      ansible.builtin.command: >
+        runuser -u postgres -- createdb {{ db_name }}
+      when: db_exists_check.stdout.strip() != "1"
+
+    - name: Ensure PostgreSQL role password is updated
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -d postgres -c
+        "ALTER ROLE {{ db_user }} WITH LOGIN PASSWORD '{{ db_password }}';"
+      changed_when: false
+
+    - name: Grant all privileges on database to user
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -d postgres -c
+        "GRANT ALL PRIVILEGES ON DATABASE {{ db_name }} TO {{ db_user }};"
+      changed_when: false
+
+    - name: Ensure database owner is app db user
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -d postgres -c
+        "ALTER DATABASE {{ db_name }} OWNER TO {{ db_user }};"
+      changed_when: false
+
+    - name: Ensure public schema owner is app db user
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -d {{ db_name }} -c
+        "ALTER SCHEMA public OWNER TO {{ db_user }};"
+      changed_when: false
+
+    - name: Ensure schema privileges for app db user
+      ansible.builtin.command: >
+        runuser -u postgres -- psql -d {{ db_name }} -c
+        "GRANT USAGE, CREATE ON SCHEMA public TO {{ db_user }};"
+      changed_when: false
+
+    # ── 7. App configuration (backend/.env) ──────────────────────
+    # Matches Settings in backend/app/config.py (env_file=".env",
+    # resolved from the process working directory = backend/).
+    - name: Write backend/.env
+      ansible.builtin.copy:
+        dest: "{{ backend_dir }}/.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0640"
+        content: |
+          APP_NAME=Ambifo CRM API
+          DATABASE_URL={{ database_url }}
+          SECRET_KEY={{ app_secret_key }}
+          JWT_ALGORITHM=HS256
+          ACCESS_TOKEN_EXPIRE_MINUTES=480
+          ENGINE_URL=http://127.0.0.1:{{ engine_port }}
+          DEFAULT_ADMIN_USERNAME={{ admin_username }}
+          DEFAULT_ADMIN_PASSWORD={{ admin_password }}
+          FRONTEND_URL={{ app_base_url }}
+          CORS_ORIGINS={{ cors_origins }}
+          SMTP_HOST={{ smtp_host }}
+          SMTP_PORT={{ smtp_port }}
+          SMTP_USERNAME={{ smtp_username }}
+          SMTP_PASSWORD={{ smtp_password }}
+          SMTP_USE_TLS={{ smtp_use_tls }}
+          SMTP_MAIL_FROM={{ smtp_mail_from }}
+          PUBLIC_BASE_URL={{ app_base_url }}
+          EMAIL_CSV_DIR=storage/email_csv
+      notify:
+        - Restart ambifo-api
+        - Restart ambifo-worker
+
+    # ── 8. Rust engine ───────────────────────────────────────────
+    - name: Install Rust toolchain via rustup (idempotent)
+      ansible.builtin.shell: |
+        set -e
+        export CARGO_HOME=/home/{{ app_user }}/.cargo
+        export RUSTUP_HOME=/home/{{ app_user }}/.rustup
+        if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+        fi
+      args:
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+      environment:
+        HOME: "/home/{{ app_user }}"
+      changed_when: false
+
+    - name: Build Rust engine (release, locked)
+      ansible.builtin.command: cargo build --release --locked
+      args:
+        chdir: "{{ engine_dir }}"
+      become_user: "{{ app_user }}"
+      environment:
+        HOME: "/home/{{ app_user }}"
+        CARGO_HOME: "/home/{{ app_user }}/.cargo"
+        RUSTUP_HOME: "/home/{{ app_user }}/.rustup"
+        PATH: "/home/{{ app_user }}/.cargo/bin:{{ ansible_env.PATH }}"
+      changed_when: false   # cargo is incremental / idempotent
+      notify:
+        - Restart ambifo-engine
+
+    - name: Ensure engine binary is executable
+      ansible.builtin.file:
+        path: "{{ engine_binary }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
+
+    # ── 9. Systemd services ──────────────────────────────────────
+    - name: Create log directory
+      ansible.builtin.file:
+        path: "{{ log_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
+
+    - name: Write ambifo-api systemd unit (FastAPI/uvicorn)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ambifo-api.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Ambifo CRM API (FastAPI / uvicorn)
+          After=network.target postgresql.service
+          Wants=ambifo-engine.service
+
+          [Service]
+          User={{ app_user }}
+          Group={{ app_group }}
+          WorkingDirectory={{ backend_dir }}
+          Environment=PATH={{ venv_dir }}/bin
+          ExecStart={{ venv_dir }}/bin/uvicorn app.main:app \
+              --host {{ api_host }} \
+              --port {{ api_port }} \
+              --workers {{ api_workers }} \
+              --proxy-headers \
+              --access-log
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+        - Restart ambifo-api
+
+    - name: Write ambifo-engine systemd unit (Rust/Axum)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ambifo-engine.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Ambifo CRM Engine (Rust / Axum)
+          After=network.target
+
+          [Service]
+          User={{ app_user }}
+          Group={{ app_group }}
+          WorkingDirectory={{ engine_dir }}
+          Environment=ENGINE_PORT={{ engine_port }}
+          ExecStart={{ engine_binary }}
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+        - Restart ambifo-engine
+
+    - name: Write ambifo-worker systemd unit (email polling worker)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ambifo-worker.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Ambifo CRM Email Worker
+          After=network.target postgresql.service
+          Requires=postgresql.service
+
+          [Service]
+          User={{ app_user }}
+          Group={{ app_group }}
+          WorkingDirectory={{ backend_dir }}
+          Environment=PATH={{ venv_dir }}/bin
+          ExecStart={{ venv_dir }}/bin/python run_worker.py
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+        - Restart ambifo-worker
+
+    - name: Enable and start API service
+      ansible.builtin.systemd:
+        name: ambifo-api
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Enable and start engine service
+      ansible.builtin.systemd:
+        name: ambifo-engine
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Enable and start worker service
+      ansible.builtin.systemd:
+        name: ambifo-worker
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # ── 10. Backups (daily pg_dump + optional S3) ────────────────
+    - name: Install AWS CLI (for optional S3 backup upload)
+      ansible.builtin.apt:
+        name: awscli
+        state: present
+      when: backup_s3_bucket is defined and backup_s3_bucket
+
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      when: enable_backup
+
+    - name: Write backup script
+      ansible.builtin.copy:
+        dest: "{{ backup_script }}"
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+          BACKUP_DIR="{{ backup_dir }}"
+          DB_NAME="{{ db_name }}"
+          DB_USER="{{ db_user }}"
+          RETENTION="{{ backup_retention_days }}"
+          export PGPASSWORD="{{ db_password }}"
+          mkdir -p "$BACKUP_DIR"
+          STAMP="$(date +%Y%m%d_%H%M%S)"
+          FILE="$BACKUP_DIR/ambifo_${STAMP}.dump"
+          pg_dump -h {{ db_host }} -U "$DB_USER" --dbname="$DB_NAME" \
+            --format=custom --no-owner --file="$FILE"
+          find "$BACKUP_DIR" -name 'ambifo_*.dump' -mtime +"$RETENTION" -delete
+          {% if backup_s3_bucket %}
+          aws s3 cp "$FILE" "s3://{{ backup_s3_bucket }}/ambifocrm/$STAMP.dump" --only-show-errors
+          {% endif %}
+      when: enable_backup
+
+    - name: Write ambifo-backup systemd oneshot service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ambifo-backup.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Ambifo CRM database backup (pg_dump)
+          After=network.target postgresql.service
+
+          [Service]
+          Type=oneshot
+          ExecStart={{ backup_script }}
+      when: enable_backup
+
+    - name: Write ambifo-backup systemd timer (daily 02:30 UTC)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ambifo-backup.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Daily Ambifo CRM database backup
+
+          [Timer]
+          OnCalendar=*-*-* 02:30:00
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify: Reload systemd
+      when: enable_backup
+
+    - name: Enable and start backup timer
+      ansible.builtin.systemd:
+        name: ambifo-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: enable_backup
+
+    # ── 11. Frontend build ───────────────────────────────────────
+    # Uses `npm ci`: package-lock.json is the source of truth. The win32-only
+    # Rolldown binding was removed from package.json (rolldown ships all native
+    # bindings via optionalDependencies), so ci/build work on Linux unchanged.
+    - name: Install frontend dependencies (immutable, from lockfile)
+      ansible.builtin.command: npm ci
+      args:
+        chdir: "{{ frontend_dir }}"
+      notify:
+        - Reload nginx
+
+    - name: Build frontend production bundle
+      ansible.builtin.command: npm run build
+      args:
+        chdir: "{{ frontend_dir }}"
+      environment:
+        VITE_API_URL: "{{ vite_api_url }}"
+      notify: Reload nginx
+      changed_when: false
+
+    - name: Create web root directory (also used as ACME webroot)
+      ansible.builtin.file:
+        path: "{{ www_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
+
+    - name: Copy built frontend into place
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ frontend_dir }}/dist/"
+        dest: "{{ www_dir }}/"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+      notify: Reload nginx
+
+    - name: Create backend static directory (email logo)
+      ansible.builtin.file:
+        path: "{{ backend_dir }}/static"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
+
+    # ── 12. Nginx + Let's Encrypt ────────────────────────────────
+    - name: Check whether a Let's Encrypt certificate already exists
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ domain_name }}/fullchain.pem"
+      register: letsencrypt_cert
+
+    - name: Remove default Nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Reload nginx
+
+    # Temporary port-80 config that only serves the ACME webroot, so the first
+    # certificate can be issued before the full HTTPS site is in place.
+    - name: Write temporary ACME webroot Nginx config
+      ansible.builtin.copy:
+        dest: /etc/nginx/sites-available/ambifo-acme
+        mode: "0644"
+        content: |
+          server {
+              listen 80;
+              server_name {{ domain_name }};
+              location /.well-known/acme-challenge/ {
+                  root {{ www_dir }};
+              }
+              location / {
+                  return 200 "ACME staging";
+              }
+          }
+      notify: Reload nginx
+      when: not letsencrypt_cert.stat.exists
+
+    - name: Enable temporary ACME site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/ambifo-acme
+        dest: /etc/nginx/sites-enabled/ambifo-acme
+        state: link
+      notify: Reload nginx
+      when: not letsencrypt_cert.stat.exists
+
+    - name: Start nginx (needed for the ACME webroot challenge)
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Issue Let's Encrypt certificate if missing
+      ansible.builtin.command: >
+        certbot certonly --webroot --webroot-path {{ www_dir }}
+        --non-interactive --agree-tos --email {{ letsencrypt_email }}
+        -d {{ domain_name }}
+      args:
+        creates: "/etc/letsencrypt/live/{{ domain_name }}/fullchain.pem"
+
+    - name: Remove temporary ACME site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/ambifo-acme
+        state: absent
+      notify: Reload nginx
+
+    - name: Remove temporary ACME config
+      ansible.builtin.file:
+        path: /etc/nginx/sites-available/ambifo-acme
+        state: absent
+
+    - name: Write Nginx site config (HTTPS, hardened)
+      ansible.builtin.copy:
+        dest: /etc/nginx/sites-available/ambifo
+        mode: "0644"
+        content: |
+          # Redirect HTTP → HTTPS (ACME webroot stays reachable for renewal)
+          server {
+              listen 80;
+              server_name {{ domain_name }};
+
+              location /.well-known/acme-challenge/ {
+                  root {{ www_dir }};
+              }
+
+              return 301 https://$host$request_uri;
+          }
+
+          # HTTPS server (Let's Encrypt)
+          server {
+              listen 443 ssl http2;
+              server_name {{ domain_name }};
+
+              ssl_certificate     /etc/letsencrypt/live/{{ domain_name }}/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/{{ domain_name }}/privkey.pem;
+              ssl_protocols       TLSv1.2 TLSv1.3;
+              ssl_ciphers         HIGH:!aNULL:!MD5;
+              ssl_prefer_server_ciphers on;
+              ssl_session_cache   shared:SSL:10m;
+              ssl_session_timeout 10m;
+
+              add_header X-Content-Type-Options "nosniff" always;
+              add_header X-Frame-Options "SAMEORIGIN" always;
+              add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+              add_header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex" always;
+
+              client_max_body_size 65M;
+
+              gzip on;
+              gzip_min_length 1024;
+              gzip_types text/plain text/css application/json application/javascript image/svg+xml;
+
+              location = /robots.txt {
+                  default_type text/plain;
+                  return 200 "User-agent: *\nDisallow: /\n";
+              }
+
+              # SPA static assets
+              root {{ www_dir }};
+              index index.html;
+
+              # Backend API + health checks -> FastAPI
+              location /api/ {
+                  proxy_pass http://{{ api_host }}:{{ api_port }};
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_set_header Connection "";
+                  proxy_read_timeout 120s;
+                  proxy_connect_timeout 10s;
+              }
+
+              location = /health {
+                  proxy_pass http://{{ api_host }}:{{ api_port }};
+              }
+
+              location = /engine/health {
+                  proxy_pass http://{{ api_host }}:{{ api_port }};
+              }
+
+              # Static assets (email branding logo)
+              location /static/ {
+                  alias {{ backend_dir }}/static/;
+                  expires 30d;
+                  add_header Cache-Control "public, immutable";
+                  add_header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex" always;
+              }
+
+              # SPA fallback for client-side routes
+              # (/customers/:id, /public/meetings/:token, ...)
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+          }
+      notify: Reload nginx
+
+    - name: Enable Nginx site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/ambifo
+        dest: /etc/nginx/sites-enabled/ambifo
+        state: link
+      notify: Reload nginx
+
+    - name: Test Nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload Nginx (apply config)
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+    - name: Ensure certbot reloads nginx after renewals
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+        content: |
+          #!/bin/sh
+          systemctl reload nginx || true
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Enable certbot auto-renewal timer
+      ansible.builtin.systemd:
+        name: certbot.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # ── 13. Firewall ─────────────────────────────────────────────
+    - name: Allow SSH through UFW
+      community.general.ufw:
+        rule: allow
+        name: OpenSSH
+      when: enable_ufw
+
+    - name: Allow Nginx HTTP and HTTPS through UFW
+      community.general.ufw:
+        rule: allow
+        name: "Nginx Full"
+      when: enable_ufw
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+        policy: deny
+      when: enable_ufw
+
+    # ── 14. Final verification ───────────────────────────────────
+    - name: Wait for API to be ready
+      ansible.builtin.uri:
+        url: "http://{{ api_host }}:{{ api_port }}/health"
+        method: GET
+        status_code: 200
+      register: health_check
+      retries: 15
+      delay: 5
+      until: health_check.status == 200
+
+    - name: Wait for engine to be reachable through the API proxy
+      ansible.builtin.uri:
+        url: "http://{{ api_host }}:{{ api_port }}/engine/health"
+        method: GET
+        status_code: 200
+      register: engine_health
+      retries: 10
+      delay: 5
+      until: engine_health.status == 200
+
+    - name: Verify HTTPS API health over the public domain
+      ansible.builtin.uri:
+        url: "https://{{ domain_name }}/health"
+        method: GET
+        status_code: 200
+        validate_certs: true
+      retries: 10
+      delay: 5
+      until: health_https.status == 200
+      register: health_https
+
+    - name: Verify HTTPS SPA root is served
+      ansible.builtin.uri:
+        url: "https://{{ domain_name }}/"
+        status_code: 200
+        validate_certs: true
+      register: spa_https
+
+    - name: Print deployment success
+      ansible.builtin.debug:
+        msg: |
+          Ambifo CRM v1 deployed successfully!
+             App URL   : {{ app_base_url }}
+             Domain    : {{ domain_name }}
+             DB name   : {{ db_name }}
+             Log dir   : {{ log_dir }}
+             Backup    : {{ backup_dir }} ({{ 'with S3 sync' if (backup_s3_bucket is defined and backup_s3_bucket) else 'local only' }})
+             Services  : systemctl status ambifo-api ambifo-engine ambifo-worker
+             API logs  : journalctl -u ambifo-api -f
+             Worker    : journalctl -u ambifo-worker -f
+             Engine    : journalctl -u ambifo-engine -f
+             Renewal   : systemctl list-timers certbot.timer
+             Health    : https://{{ domain_name }}/health
+             Default login: {{ admin_username }} (password set via -e admin_password)
+
+  # ─────────────────────────────────────────────────────────────
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart ambifo-api
+      ansible.builtin.systemd:
+        name: ambifo-api
+        state: restarted
+        daemon_reload: true
+
+    - name: Restart ambifo-engine
+      ansible.builtin.systemd:
+        name: ambifo-engine
+        state: restarted
+        daemon_reload: true
+
+    - name: Restart ambifo-worker
+      ansible.builtin.systemd:
+        name: ambifo-worker
+        state: restarted
+        daemon_reload: true
+
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded

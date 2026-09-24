@@ -1,20 +1,33 @@
+# Python
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
 .venv/
-instance/
-uploads/*
-!uploads/.gitkeep
+.env
+*.log
 
-# Generated / temp documents
-documents/*
-!documents/.gitkeep
+# Storage
+storage/
+*.db
 
-# Data & uploaded files that should not be committed
-*.xlsx
-*.docx
-*.csv
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
 
-# OS / editor junk
+# Rust
+backend/engine/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
 Thumbs.db

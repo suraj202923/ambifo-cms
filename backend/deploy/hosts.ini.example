@@ -1,0 +1,49 @@
+# ╔═══════════════════════════════════════════════════════════════════════╗
+# ║  Ambifo CRM v1 — example Ansible inventory for the AWS EC2 server      ║
+# ║                                                                        ║
+# ║  Copy this file to `hosts.ini` in this directory, fill in the values,  ║
+# ║  then run:                                                            ║
+# ║                                                         ║
+# ║    ansible-galaxy collection install community.general                 ║
+# ║    ansible-playbook -i hosts.ini deploy.yml \                          ║
+# ║      -e app_secret_key=<long-random> \                                 ║
+# ║      -e db_password=<db-pass> \                                        ║
+# ║      -e admin_password=<admin-pass> \                                  ║
+# ║      -e postgres_password=<postgres-superuser-pass>                    ║
+# ║                                                                        ║
+# ║  Secrets shouldn't live in an inventory file that gets committed —     ║
+# ║  pass them with -e (preferred) or from ansible-vault.                  ║
+# ╚═══════════════════════════════════════════════════════════════════════╝
+
+[ambifo_server]
+# Public IP (or DNS name) of your EC2 instance, and the SSH user.
+# Ubuntu 24.04 default user is `ubuntu` (may need a key: see the SSH note
+# in deploy.yml header — add `ansible_ssh_private_key_file=...` if the key
+# is not in your SSH agent).
+203.0.113.10 ansible_user=ubuntu
+
+[ambifo_server:vars]
+# ── REQUIRED by deploy.yml (can also be passed with -e, which takes priority)
+git_repo_url=https://github.com/you/ambifo-crm-v1
+domain_name=crm.example.com
+letsencrypt_email=you@example.com
+
+# ── OPTIONAL overrides ─────────────────────────────────────────────────
+# Private repo over SSH? Put the raw private key here or pass with -e:
+#git_ssh_key=-----BEGIN OPENSSH PRIVATE KEY-----
+#...
+#-----END OPENSSH PRIVATE KEY-----
+
+# Deploy a specific branch or single server straight from the CLI:
+#ansible_user=ubuntu
+#ansible_ssh_private_key_file=~/.ssh/ambifo-key.pem
+#git_branch=main
+
+# Non-default ports / worker count:
+#api_workers=1
+#engine_port=8081
+
+# Off-site database backups:
+#backup_s3_bucket=ambifo-crm-backups
+#backup_retention_days=14
+#enable_backup=true
