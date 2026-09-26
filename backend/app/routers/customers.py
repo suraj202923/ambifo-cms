@@ -3,8 +3,8 @@ import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
@@ -19,10 +19,9 @@ from ..models.crm import (
     OpportunityUpdateTag,
     PartnerReferenceContact,
 )
+from ..models.documents import CustomerDiagram, CustomerDocument, CustomerSOW
 from ..models.email import EmailLog
 from ..models.user import User
-from ..models.documents import CustomerDocument, CustomerDiagram, CustomerSOW, SOWMasterTemplate
-from ..services.numbering import assign_sr_no
 from ..schemas.crm import (
     BulkUpdate,
     CloudOperatorOut,
@@ -37,6 +36,7 @@ from ..schemas.crm import (
     StatusOut,
     UpdateTagOut,
 )
+from ..services.numbering import assign_sr_no
 
 router = APIRouter(prefix="/api", tags=["customers"])
 
@@ -268,8 +268,10 @@ def delete_customer(
     ).update({PartnerReferenceContact.customer_id: None})
 
     # Cascade cleanup for related records
-    from ..models.gathering import GatheringRequest, GatheringServerDetail, GatheringBlockStorageDetail, GatheringFileNasDetail
-    from ..models.meetings import MeetingInvite, MeetingAvailabilityRequest
+    from ..models.gathering import (
+        GatheringRequest,
+    )
+    from ..models.meetings import MeetingAvailabilityRequest, MeetingInvite
 
     for model in (CustomerDiagram, CustomerDocument, CustomerSOW, OpportunityHistory):
         db.query(model).filter(model.customer_id == customer_id).delete(synchronize_session=False)
@@ -287,8 +289,13 @@ def delete_all_customers(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    from ..models.gathering import GatheringRequest, GatheringServerDetail, GatheringBlockStorageDetail, GatheringFileNasDetail
-    from ..models.meetings import MeetingInvite, MeetingAvailabilityRequest
+    from ..models.gathering import (
+        GatheringBlockStorageDetail,
+        GatheringFileNasDetail,
+        GatheringRequest,
+        GatheringServerDetail,
+    )
+    from ..models.meetings import MeetingAvailabilityRequest, MeetingInvite
 
     # Detach shared references so related rows survive the sweep
     db.query(EmailLog).filter(EmailLog.customer_id.isnot(None)).update(

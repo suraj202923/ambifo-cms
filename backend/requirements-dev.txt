@@ -1,0 +1,13 @@
+# Linter / type-checker tooling for local development and CI.
+#
+# Install with:  pip install -r requirements-dev.txt
+#
+# Ruff's version is pinned on purpose. Ruff is installed straight from this
+# file in CI, and the rule set it applies depends on its version. An unpinned
+# install meant a Ruff release could change the rules and turn CI red with no
+# change to this repository (the rule set itself is pinned in ruff.toml).
+ruff==0.16.9
+
+# Advisory only - the CI type-check step is allowed to fail, so this is
+# intentionally unpinned.
+mypy

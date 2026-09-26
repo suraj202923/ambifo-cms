@@ -9,8 +9,6 @@ import dns.resolver
 from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, Response
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -32,19 +30,18 @@ from ..schemas.engine import (
     EmailCsvResultOut,
     EmailLogOut,
     EmailLogPageOut,
+    EmailLogStatsOut,
     EmailSendIn,
     EmailSendOut,
     EmailSettingsOut,
     EmailSettingsUpdate,
-    EmailTestIn,
-    EmailTestResult,
-    EmailTestTemplateIn,
     EmailTemplateCreate,
     EmailTemplateOut,
     EmailTemplateUpdate,
-    EmailUnsubOut,
+    EmailTestIn,
+    EmailTestResult,
+    EmailTestTemplateIn,
     EmailUnsubPageOut,
-    EmailLogStatsOut,
 )
 from ..services.email_sender import (
     is_unsubscribed,
@@ -290,8 +287,8 @@ def _alternate_emails(customer: Customer | None) -> list[str]:
 
 
 def _record_history(db: Session, customer_id: int, subject: str, recipient: str, changed_by: str) -> None:
-    from .customers import history_created
     from ..models.crm import OpportunityHistory
+    from .customers import history_created
     hist = OpportunityHistory()
     history_created(hist, customer_id, "email", f"Sent '{subject}' to {recipient}", changed_by, tag="email")
     db.add(hist)
@@ -637,7 +634,7 @@ def _resolve_recipients(payload: EmailBulkSendIn, db: Session) -> list[dict]:
             q = q.filter(Lead.last_email_status == "sent")
         elif payload.lead_send_state == "not_emailed":
             q = q.filter(or_(Lead.last_email_status.is_(None), Lead.last_email_status != "sent"))
-        return [{"customer_id": None, "email": l.email, "context": lead_context(l)} for l in q]
+        return [{"customer_id": None, "email": lead.email, "context": lead_context(lead)} for lead in q]
 
     if payload.mode == "select_customers":
         if not payload.customer_ids:

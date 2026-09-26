@@ -28,7 +28,7 @@ from ..schemas.gathering import (
     ServerDetailOut,
 )
 from ..security import hash_password, verify_password
-from ..services.messaging import format_dt, now_utc, send_email_via_engine
+from ..services.messaging import format_dt, send_email_via_engine
 
 router = APIRouter(prefix="/api/gathering", tags=["gathering"])
 public_router = APIRouter(prefix="/api/public/gathering", tags=["public-gathering"])

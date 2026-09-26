@@ -1,0 +1,39 @@
+# Ruff configuration for the FastAPI backend.
+#
+# This file pins the rule set explicitly. Without it, `ruff check app/` runs
+# whatever the installed Ruff happens to default to, so a Ruff release can
+# silently change the rules and break CI.
+#
+# E4/E7/E9 are Ruff's classic default group and deliberately exclude E501
+# (line length), which would otherwise flag ~300 existing lines.
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+
+[lint.flake8-bugbear]
+# Calling these in argument defaults is the documented FastAPI idiom for
+# dependency injection and query/file declarations, not a mutable-default bug.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Body",
+    "fastapi.Header",
+    "Depends",
+    "Query",
+    "Path",
+    "File",
+    "Form",
+    "Body",
+    "Header",
+]
+
+[lint.per-file-ignores]
+# Model registration order here is deliberate: SQLAlchemy resolves
+# relationship() string references against the registry as each model is
+# imported, so re-sorting this block can break mapper configuration.
+"app/models/__init__.py" = ["I001"]

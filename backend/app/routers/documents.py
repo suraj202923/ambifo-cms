@@ -243,7 +243,7 @@ def send_sow_email(
     if not to_email:
         raise HTTPException(status_code=400, detail="No recipient email available")
 
-    from ..routers.email import get_system_template, render_template
+    from ..routers.email import get_system_template
     from ..services.messaging import enqueue_email
 
     template = get_system_template(db, "System - SOW Document Email")

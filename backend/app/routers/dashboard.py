@@ -6,9 +6,15 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models.crm import Customer, OpportunityFinancial, OpportunityHistory, Lead, OpportunityStatus
+from ..models.crm import Customer, Lead, OpportunityFinancial, OpportunityHistory, OpportunityStatus
 from ..models.user import User
-from ..schemas.dashboard import DashboardOut, AssigneeCount, DashboardKPIs, SegmentCount, StatusCount
+from ..schemas.dashboard import (
+    AssigneeCount,
+    DashboardKPIs,
+    DashboardOut,
+    SegmentCount,
+    StatusCount,
+)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 

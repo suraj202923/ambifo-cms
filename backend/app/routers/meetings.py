@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from secrets import token_urlsafe
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -259,7 +259,7 @@ def public_availability_form(token: str, payload: AvailabilityFormIn, db: Sessio
     req.status = "submitted-form"
     customer = db.get(Customer, req.customer_id)
     if customer:
-        note = f"[Meeting availability] Submitted custom slots."
+        note = "[Meeting availability] Submitted custom slots."
         customer.comment = f"{customer.comment or ''}\n{note}".strip()
     db.commit()
     db.refresh(req)

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -14,6 +15,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
 from .mixins import IDMixin, TimestampMixin
+
+if TYPE_CHECKING:
+    from .user import User
 
 
 class Customer(IDMixin, TimestampMixin, Base):
