@@ -1,20 +1,23 @@
-"""AWS Pricing Calculator access — estimate download + CSV export + PDF.
+"""AWS Pricing Calculator access — estimate download, CSV export, BOM and PDF.
 
 Estimates are fetched from AWS's public CDN API (the same one the calculator
-web app uses), then rendered into the AWS-export CSV layout. A headless
-browser is only used to render the estimate as a PDF.
+web app uses), then rendered into the AWS-export CSV layout, a Bill of
+Materials workbook and a print-ready PDF. No browser is used to read the
+estimate: headless Chromium only prints our own HTML, so the PDF always
+paginates properly instead of capturing a single screenful of the web UI.
 """
 
 from __future__ import annotations
 
 import asyncio
 import csv as _csv
+import html
 import io
 import json
 import logging
 import re
 import time
-from pathlib import Path
+from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -287,66 +290,215 @@ def _num(value: Any) -> float:
         return 0.0
 
 
-def estimate_to_csv(estimate: dict, name_map: dict[str, str] | None = None) -> str:
-    """Render an estimate dict as an AWS-style exported CSV string."""
+def service_names() -> dict[str, str]:
+    """Public accessor for the cached serviceCode → display name map."""
+    return _service_names()
+
+
+def estimate_to_bom_items(
+    estimate: dict, name_map: dict[str, str] | None = None
+) -> tuple[list[dict], str, str]:
+    """Extract (line items, estimate name, currency) straight from an estimate dict.
+
+    This is the source of truth for Bill of Materials generation. The estimate is
+    read from the AWS Pricing Calculator share link, so the line items never make
+    a round trip through a CSV export and nothing here depends on the column
+    layout of a downloaded file.
+    """
     services = _flatten_estimate_services(estimate)
     meta = estimate.get("metaData") or {}
-    currency = (meta.get("currency") or "USD").strip()
-    name = (estimate.get("name") or "AWS Pricing Calculator Estimate").strip()
+    currency = (meta.get("currency") or "USD").strip() or "USD"
+    estimate_name = (estimate.get("name") or "AWS Pricing Calculator Estimate").strip()
     name_map = name_map or {}
-    total = estimate.get("totalCost") or {}
-    total_monthly = _num(total.get("monthly"))
-    total_upfront = _num(total.get("upfront"))
 
-    buf = io.StringIO()
-    writer = _csv.writer(buf, lineterminator="\n")
-    writer.writerow(["Estimate name", name, "", "Currency", currency, "", ""])
-    if meta.get("createdOn"):
-        writer.writerow(["Saved on", meta.get("createdOn")])
-    writer.writerow([])
-    writer.writerow(["Service", "Service group", "Region", "Configuration", "Monthly cost", "Upfront cost"])
-
+    items: list[dict] = []
     for svc in services:
         code = (svc.get("serviceCode") or "").strip()
         svc_name = (svc.get("serviceName") or "").strip() or name_map.get(code) or code
+        if not svc_name:
+            continue
         region = (svc.get("regionName") or svc.get("region") or "").strip()
         config = _summarize_components(svc.get("calculationComponents")).strip()
         if not config:
             raw_config = (svc.get("configSummary") or "").strip()
             raw_config = re.sub(r"\[object Object\]|undefined|null", "", raw_config)
             config = re.sub(r",\s*,", ",", raw_config).strip()
-        sc = svc.get("serviceCost") or {}
-        writer.writerow([
-            svc_name,
-            (svc.get("group") or "").strip(),
-            region,
-            config,
-            f"{_num(sc.get('monthly')):.2f}",
-            f"{_num(sc.get('upfront')):.2f}",
-        ])
+        cost = svc.get("serviceCost") or {}
+        items.append(
+            {
+                "group": (svc.get("group") or "").strip(),
+                "service": svc_name,
+                "region": region,
+                "configuration": config,
+                "monthly": _num(cost.get("monthly")),
+                "upfront": _num(cost.get("upfront")),
+            }
+        )
+    return items, estimate_name, currency
+
+
+def estimate_from_link(url_or_id: str, timeout_sec: int = 30) -> dict:
+    """Fetch a shared estimate from an AWS Calculator link, validating the id first."""
+    if not parse_estimate_id(url_or_id):
+        raise RuntimeError("Could not extract an estimate ID from the AWS Calculator link.")
+    return fetch_estimate(url_or_id, timeout_sec=timeout_sec)
+
+
+def bom_items_from_link(url_or_id: str, timeout_sec: int = 30) -> tuple[list[dict], str, str]:
+    """Read an AWS Calculator share link and return its BOM line items."""
+    estimate = estimate_from_link(url_or_id, timeout_sec=timeout_sec)
+    return estimate_to_bom_items(estimate, _service_names())
+
+
+def estimate_to_csv(estimate: dict, name_map: dict[str, str] | None = None) -> str:
+    """Render an estimate dict as an AWS-style exported CSV string.
+
+    This is a customer-facing artefact only - the Bill of Materials is built from
+    `estimate_to_bom_items` instead, so the CSV is never a dependency.
+    """
+    items, estimate_name, currency = estimate_to_bom_items(estimate, name_map)
+    total = estimate.get("totalCost") or {}
+    total_monthly = _num(total.get("monthly"))
+    total_upfront = _num(total.get("upfront"))
+
+    buf = io.StringIO()
+    writer = _csv.writer(buf, lineterminator="\n")
+    writer.writerow(["Estimate name", estimate_name, "", "Currency", currency, "", ""])
+    created_on = (estimate.get("metaData") or {}).get("createdOn")
+    if created_on:
+        writer.writerow(["Saved on", created_on])
+    writer.writerow([])
+    writer.writerow(["Service", "Service group", "Region", "Configuration", "Monthly cost", "Upfront cost"])
+    for it in items:
+        writer.writerow(
+            [
+                it["service"],
+                it["group"],
+                it["region"],
+                it["configuration"],
+                f"{it['monthly']:.2f}",
+                f"{it['upfront']:.2f}",
+            ]
+        )
     writer.writerow(["TOTAL", "", "", "", f"{total_monthly:.2f}", f"{total_upfront:.2f}"])
     return buf.getvalue()
 
 
-def download_estimate_csv(url_or_id: str, dest_dir: str | Path, timeout_sec: int = 30) -> str:
-    """Fetch a shared estimate from the calculator API and save it as CSV.
+def estimate_to_pdf_html(
+    estimate: dict,
+    name_map: dict[str, str] | None = None,
+    sr_no: int | None = None,
+) -> str:
+    """Render an estimate dict as print-optimised HTML for the PDF artefact.
 
-    Returns the path to the saved CSV file.
+    The PDF is produced from the estimate itself rather than by printing the
+    calculator's single-page web app, which yields nav chrome and only the
+    visible slice of the estimate. This layout paginates properly, repeats the
+    table header on every page and never drops rows off the bottom.
     """
-    estimate_id = parse_estimate_id(url_or_id)
-    if not estimate_id:
-        raise RuntimeError("Could not extract an estimate ID from the AWS Calculator link.")
+    items, estimate_name, currency = estimate_to_bom_items(estimate, name_map)
+    esc = html.escape
+    total = sum(it["monthly"] for it in items)
 
-    estimate = fetch_estimate(url_or_id, timeout_sec=timeout_sec)
-    names = _service_names()
-    csv_text = estimate_to_csv(estimate, names)
+    rows = []
+    for it in sorted(items, key=lambda it: (it["group"] or "", it["service"] or "")):
+        rows.append(
+            "<tr>"
+            f"<td class='sr'>{esc(str(sr_no)) if sr_no is not None else ''}</td>"
+            f"<td class='svc'>{esc(it['service'])}</td>"
+            f"<td>{esc(it['region'])}</td>"
+            f"<td class='cfg'>{esc(it['configuration'])}</td>"
+            f"<td class='num'>1</td>"
+            f"<td class='num'>{it['monthly']:,.2f}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append(
+            "<tr><td colspan='6' class='empty'>This estimate contains no services.</td></tr>"
+        )
 
-    dest = Path(dest_dir)
-    dest.mkdir(parents=True, exist_ok=True)
-    out_path = dest / f"AWS-Calculator-{estimate_id[:12]}.csv"
-    out_path.write_text(csv_text, encoding="utf-8")
-    logger.info("Estimate CSV saved → %s", out_path)
-    return str(out_path)
+    sr_head = "<th class='sr'>Sr. No</th>" if sr_no is not None else ""
+    sr_total = f"<td class='sr'>{esc(str(sr_no))}</td>" if sr_no is not None else "<td></td>"
+
+    generated = datetime.now().strftime("%d %b %Y %H:%M")
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>{esc(estimate_name)}</title>
+<style>
+  @page {{ size: A4; margin: 12mm 10mm 14mm; }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ margin: 0; padding: 0; }}
+  body {{
+    font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+    font-size: 8.5pt; color: #1e293b; line-height: 1.35;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }}
+  h1 {{ font-size: 15pt; margin: 0 0 2px; letter-spacing: -0.2px; }}
+  .sub {{ font-size: 8pt; color: #64748b; margin-bottom: 10px; }}
+  .meta {{ font-size: 8pt; color: #475569; margin-bottom: 12px; }}
+  .meta span {{ margin-right: 14px; }}
+  table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+  thead {{ display: table-header-group; }}
+  tr {{ page-break-inside: avoid; }}
+  th {{
+    background: #1e293b; color: #fff; font-size: 8pt; font-weight: 600;
+    text-align: left; padding: 5px 6px; border: 1px solid #1e293b;
+  }}
+  td {{ padding: 4px 6px; border: 1px solid #e2e8f0; vertical-align: top; }}
+  th.sr, td.sr {{ width: 46px; text-align: center; }}
+  th.svc, td.svc {{ width: 132px; font-weight: 600; }}
+  th:nth-child(3), td:nth-child(3) {{ width: 96px; }}
+  td.cfg {{ color: #475569; word-break: break-word; }}
+  th.num, td.num {{ width: 58px; text-align: right; white-space: nowrap; }}
+  tfoot td {{ background: #ecfdf5; font-weight: 700; font-size: 8.5pt; border-top: 2px solid #0d9488; }}
+  td.empty {{ text-align: center; color: #94a3b8; font-style: italic; padding: 14px; }}
+  .foot {{ margin-top: 10px; font-size: 7pt; color: #94a3b8; }}
+</style></head>
+<body>
+  <h1>{esc(estimate_name)}</h1>
+  <div class="sub">AWS Pricing Calculator estimate</div>
+  <div class="meta">
+    <span><b>Currency:</b> {esc(currency)}</span>
+    <span><b>Line items:</b> {len(items)}</span>
+    <span><b>Total monthly:</b> {total:,.2f} {esc(currency)}</span>
+    <span><b>Generated:</b> {esc(generated)}</span>
+  </div>
+  <table>
+    <thead><tr>{sr_head}<th>Service</th><th>Region</th><th>Description (configuration)</th>
+      <th class="num">Qty</th><th class="num">Monthly</th></tr></thead>
+    <tbody>{''.join(rows)}</tbody>
+    <tfoot><tr>{sr_total}<td colspan='3'>TOTAL</td>
+      <td class='num'>{len(items)}</td><td class='num'>{total:,.2f}</td></tr></tfoot>
+  </table>
+  <div class="foot">Generated from the AWS Pricing Calculator share link on the customer
+    record. Costs are estimates in {esc(currency)} and exclude taxes, support and
+    any negotiated discounts.</div>
+</body></html>"""
+
+
+async def html_to_pdf(html_doc: str, timeout_sec: int = 60) -> bytes:
+    """Print an HTML document to PDF bytes with headless Chromium."""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        )
+        try:
+            page = await browser.new_page()
+            await page.set_content(html_doc, wait_until="load", timeout=timeout_sec * 1000)
+            return await page.pdf(
+                format="A4",
+                print_background=True,
+                margin={"top": "12mm", "bottom": "14mm", "left": "10mm", "right": "10mm"},
+            )
+        finally:
+            await browser.close()
+
+
+def html_to_pdf_sync(html_doc: str, timeout_sec: int = 60) -> bytes:
+    """Synchronous wrapper around :func:`html_to_pdf`."""
+    return asyncio.run(html_to_pdf(html_doc, timeout_sec))
 
 
 def extract_estimate_id(url: str) -> str | None:
@@ -363,307 +515,3 @@ def extract_estimate_id(url: str) -> str | None:
     return None
 
 
-async def _dismiss_modal(page) -> None:
-    """Best-effort dismissal of cookie / modal banners that block interaction."""
-    for dismiss_sel in [
-        "button:has-text('Got it')",
-        "button:has-text('Accept')",
-        "button:has-text('Close')",
-        "button:has-text('Dismiss')",
-        "[aria-label='Close']",
-        "[aria-label='Dismiss']",
-    ]:
-        try:
-            btn = page.locator(dismiss_sel).first
-            if await btn.is_visible(timeout=500):
-                await btn.click()
-                await page.wait_for_timeout(500)
-        except Exception:
-            pass
-
-
-async def download_from_calculator(
-    url: str,
-    dest_dir: str | Path,
-    timeout_sec: int = 90,
-) -> str:
-    """
-    Open an AWS Calculator share link in a headless browser, trigger the
-    Export → CSV action, and save the file to *dest_dir*.
-
-    Returns the path to the downloaded CSV file.
-    """
-    from playwright.async_api import async_playwright
-
-    dest = Path(dest_dir)
-    dest.mkdir(parents=True, exist_ok=True)
-
-    csv_path: str | None = None
-
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
-        )
-        try:
-            ctx = await browser.new_context(
-                viewport={"width": 1440, "height": 900},
-                accept_downloads=True,
-            )
-            page = await ctx.new_page()
-
-            logger.info("Navigating to %s", url)
-            await page.goto(url, wait_until="networkidle", timeout=timeout_sec * 1000)
-
-            # Give the SPA time to hydrate and render the estimate
-            await page.wait_for_timeout(5000)
-
-            # Try to dismiss any modal / cookie banner that blocks interaction
-            for dismiss_sel in [
-                "button:has-text('Got it')",
-                "button:has-text('Accept')",
-                "button:has-text('Close')",
-                "button:has-text('Dismiss')",
-                "[aria-label='Close']",
-                "[aria-label='Dismiss']",
-            ]:
-                try:
-                    btn = page.locator(dismiss_sel).first
-                    if await btn.is_visible(timeout=500):
-                        await btn.click()
-                        await page.wait_for_timeout(500)
-                except Exception:
-                    pass
-
-            # ------------------------------------------------------------------
-            # Find and click the Export / Download button
-            # ------------------------------------------------------------------
-            export_btn = None
-            for sel in [
-                "button:has-text('Export')",
-                "button:has-text('Download')",
-                "a:has-text('Export')",
-                "a:has-text('Download')",
-                "[data-testid='export-button']",
-                "[data-testid='download-button']",
-                "button:has-text('Share')",
-            ]:
-                try:
-                    loc = page.locator(sel).first
-                    if await loc.is_visible(timeout=1000):
-                        export_btn = loc
-                        break
-                except Exception:
-                    continue
-
-            if not export_btn:
-                # Last resort: scan all buttons for export-related text
-                buttons = page.locator("button, a[role='button']")
-                count = await buttons.count()
-                for i in range(count):
-                    try:
-                        txt = (await buttons.nth(i).inner_text()).strip().lower()
-                        if any(kw in txt for kw in ("export", "download", "save")):
-                            export_btn = buttons.nth(i)
-                            break
-                    except Exception:
-                        continue
-
-            if not export_btn:
-                raise RuntimeError(
-                    "Could not find an Export / Download button on the page. "
-                    "The estimate might be private or the page layout has changed."
-                )
-
-            # ------------------------------------------------------------------
-            # Capture CSV download
-            # ------------------------------------------------------------------
-            logger.info("Triggering CSV export …")
-            async with page.expect_download(timeout=30_000) as dl_info:
-                await export_btn.click()
-                await page.wait_for_timeout(1000)
-
-                csv_loc = page.locator(
-                    "button:has-text('CSV'), a:has-text('CSV'), "
-                    "[data-testid='export-csv'], li:has-text('CSV')"
-                ).first
-                if await csv_loc.is_visible(timeout=3000):
-                    await csv_loc.click()
-                else:
-                    # Fallback: click whatever menu item has "csv" text
-                    items = page.locator("li, [role='menuitem'], [role='option']")
-                    cnt = await items.count()
-                    for j in range(cnt):
-                        try:
-                            t = (await items.nth(j).inner_text()).strip().lower()
-                            if "csv" in t:
-                                await items.nth(j).click()
-                                break
-                        except Exception:
-                            continue
-
-            download = await dl_info.value
-            out_path = dest / (download.suggested_filename or "estimate.csv")
-            await download.save_as(str(out_path))
-            csv_path = str(out_path)
-            logger.info("CSV saved → %s", out_path)
-
-        finally:
-            await browser.close()
-
-    if not csv_path:
-        raise RuntimeError(
-            "Unable to download the CSV from the AWS Calculator link. "
-            "Please verify the link is a valid public share link."
-        )
-
-    return csv_path
-
-
-async def download_from_calculator_pdf(
-    url: str,
-    dest_dir: str | Path,
-    timeout_sec: int = 90,
-) -> str:
-    """
-    Open an AWS Calculator share link in a headless browser and produce a PDF.
-
-    First tries the site's own Export → PDF action; if that is not available,
-    falls back to rendering the page to PDF with headless Chromium printing.
-
-    Returns the path to the downloaded PDF file.
-    """
-    from playwright.async_api import async_playwright
-
-    dest = Path(dest_dir)
-    dest.mkdir(parents=True, exist_ok=True)
-
-    pdf_path: str | None = None
-
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
-        )
-        try:
-            ctx = await browser.new_context(
-                viewport={"width": 1440, "height": 900},
-                accept_downloads=True,
-            )
-            page = await ctx.new_page()
-
-            logger.info("Navigating to %s (PDF)", url)
-            await page.goto(url, wait_until="networkidle", timeout=timeout_sec * 1000)
-
-            # Give the SPA time to hydrate and render the estimate
-            await page.wait_for_timeout(5000)
-            await _dismiss_modal(page)
-
-            # ------------------------------------------------------------------
-            # Try the site's own Export → PDF action
-            # ------------------------------------------------------------------
-            export_btn = None
-            for sel in [
-                "button:has-text('Export')",
-                "button:has-text('Download')",
-                "a:has-text('Export')",
-                "a:has-text('Download')",
-                "[data-testid='export-button']",
-                "[data-testid='download-button']",
-            ]:
-                try:
-                    loc = page.locator(sel).first
-                    if await loc.is_visible(timeout=1000):
-                        export_btn = loc
-                        break
-                except Exception:
-                    continue
-
-            if export_btn:
-                logger.info("Triggering PDF export …")
-                download = None
-                try:
-                    async with page.expect_download(timeout=15_000) as dl_info:
-                        await export_btn.click()
-                        await page.wait_for_timeout(1000)
-
-                        pdf_loc = page.locator(
-                            "button:has-text('PDF'), a:has-text('PDF'), "
-                            "[data-testid='export-pdf'], [data-testid='download-pdf'], "
-                            "li:has-text('PDF')"
-                        ).first
-                        try:
-                            if await pdf_loc.is_visible(timeout=3000):
-                                await pdf_loc.click()
-                            else:
-                                items = page.locator("li, [role='menuitem'], [role='option']")
-                                cnt = await items.count()
-                                for j in range(cnt):
-                                    try:
-                                        t = (await items.nth(j).inner_text()).strip().lower()
-                                        if "pdf" in t:
-                                            await items.nth(j).click()
-                                            break
-                                    except Exception:
-                                        continue
-                        except Exception:
-                            pass
-
-                    download = await dl_info.value
-                except Exception:
-                    download = None
-
-                if download:
-                    out_path = dest / (download.suggested_filename or "estimate.pdf")
-                    await download.save_as(str(out_path))
-                    pdf_path = str(out_path)
-                    logger.info("PDF saved → %s", out_path)
-
-            # ------------------------------------------------------------------
-            # Fallback: print the rendered estimate page to a PDF
-            # ------------------------------------------------------------------
-            if not pdf_path:
-                estimate_id = extract_estimate_id(url) or "estimate"
-                out_path = dest / f"estimate-{estimate_id}.pdf"
-                await page.pdf(path=str(out_path), format="A4", print_background=True)
-                pdf_path = str(out_path)
-                logger.info("PDF (print) saved → %s", out_path)
-
-        finally:
-            await browser.close()
-
-    if not pdf_path:
-        raise RuntimeError(
-            "Unable to download the PDF from the AWS Calculator link. "
-            "Please verify the link is a valid public share link."
-        )
-
-    return pdf_path
-
-
-def download_from_calculator_pdf_sync(
-    url: str,
-    dest_dir: str | Path,
-    timeout_sec: int = 90,
-) -> str:
-    """Synchronous wrapper around the async Playwright PDF downloader."""
-    return asyncio.run(download_from_calculator_pdf(url, dest_dir, timeout_sec))
-
-
-def download_from_calculator_sync(
-    url: str,
-    dest_dir: str | Path,
-    timeout_sec: int = 90,
-) -> str:
-    """Synchronous wrapper around the async Playwright downloader."""
-    return asyncio.run(download_from_calculator(url, dest_dir, timeout_sec))

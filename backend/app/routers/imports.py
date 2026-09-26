@@ -19,6 +19,7 @@ from ..schemas.engine import (
     ImportResultOut,
 )
 from ..services.engine_client import engine_client
+from ..services.numbering import assign_sr_no
 
 router = APIRouter(prefix="/api/import", tags=["imports"])
 
@@ -227,6 +228,7 @@ def _upsert_customers(
                 email = _synthetic_email(name, idx)
             attrs = {k: v for k, v in fields.items() if k != "customer_name"}
             customer = Customer(customer_name=name or email.split("@")[0], email=email, **attrs)
+            assign_sr_no(db, customer)
             db.add(customer)
             db.flush()
             hist = OpportunityHistory()
@@ -331,6 +333,7 @@ def import_customers(
             skipped += 1
             continue
         customer = Customer(customer_name=rec["customer_name"], **{k: v for k, v in rec.items() if k != "customer_name"})
+        assign_sr_no(db, customer)
         db.add(customer)
         db.flush()
         hist = OpportunityHistory()

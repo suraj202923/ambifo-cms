@@ -53,6 +53,8 @@ class CustomerOut(CustomerBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    # Server-assigned sequential number for the opportunity list (read-only).
+    sr_no: int | None = None
     created_at: datetime
     updated_at: datetime
 

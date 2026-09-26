@@ -22,6 +22,7 @@ from ..models.crm import (
 from ..models.email import EmailLog
 from ..models.user import User
 from ..models.documents import CustomerDocument, CustomerDiagram, CustomerSOW, SOWMasterTemplate
+from ..services.numbering import assign_sr_no
 from ..schemas.crm import (
     BulkUpdate,
     CloudOperatorOut,
@@ -129,7 +130,9 @@ def list_customers(
         q = q.filter(Customer.deal_status == deal_status)
     if assignee_id:
         q = q.filter(Customer.assign_to_user_id == assignee_id)
-    q = q.order_by(Customer.updated_at.desc()).limit(limit).offset(offset)
+    # Default to newest Sr. No. first so paging stays coherent with the UI sort
+    # (unnumbered legacy rows sink to the bottom).
+    q = q.order_by(Customer.sr_no.desc().nullslast(), Customer.id.desc()).limit(limit).offset(offset)
     return q.all()
 
 
@@ -143,6 +146,7 @@ def create_customer(
     if exists:
         raise HTTPException(status_code=409, detail="Customer with this email already exists")
     customer = Customer(**payload.model_dump())
+    assign_sr_no(db, customer)
     db.add(customer)
     db.flush()
     history_created(OpportunityHistory(), customer.id, "created",

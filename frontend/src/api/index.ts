@@ -231,14 +231,11 @@ upload: async (customerId: number, file: File, description?: string) => {
     }
     return resp.json() as Promise<CustomerDocument>
   },
-  generateBom: async (customerId: number, file: File) => {
-    const fd = new FormData()
-    fd.append('file', file)
+  generateBom: async (customerId: number) => {
     const qs = new URLSearchParams({ customer_id: String(customerId) })
     const resp = await fetch(`${API_BASE}/api/documents/bom/generate?${qs}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}` },
-      body: fd,
     })
     if (!resp.ok) {
       const data = await resp.json().catch(() => null)

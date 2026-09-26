@@ -36,6 +36,10 @@ class Customer(IDMixin, TimestampMixin, Base):
     deal_status: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_action_planned: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Auto-assigned sequential "Sr. No." for the opportunity list, handed out in
+    # creation order (see services/numbering.py). Nullable so pre-existing rows
+    # can be backfilled; never set by hand.
+    sr_no: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     assign_to_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )

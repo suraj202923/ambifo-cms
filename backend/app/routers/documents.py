@@ -1,5 +1,4 @@
 import asyncio
-import csv as _csv
 import os
 import uuid
 from datetime import datetime, timezone
@@ -21,6 +20,8 @@ from ..services.settings import get_setting
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 DOC_STORAGE_DIR = "storage/documents"
+
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def now() -> datetime:
@@ -302,98 +303,12 @@ def _next_sow_version(db: Session, customer_id: int) -> str:
         return "1.0"
 
 
-def _col_index(header: list[str], *names: str) -> int | None:
-    lowered = [(cell or "").strip().lower() for cell in header]
-
-    def score(cell: str, name: str) -> int:
-        if cell == name:
-            return 3
-        if cell.startswith(name):
-            return 2
-        if f" {name}" in cell:
-            return 1
-        return 0
-
-    best_idx: int | None = None
-    best_score = 0
-    for idx, cell in enumerate(lowered):
-        for name in names:
-            current = score(cell, name)
-            if current > best_score:
-                best_idx, best_score = idx, current
-    return best_idx
-
-
-def _parse_aws_calc_csv(text: str) -> tuple[list[dict], str, str]:
-    """Parse an AWS Pricing Calculator CSV export into (items, estimate_name, currency)."""
-    reader = list(_csv.reader(text.splitlines(True)))
-    estimate_name = "AWS Pricing Calculator Estimate"
-    currency = "USD"
-
-    if reader and reader[0] and "estimate" in (reader[0][0] or "").strip().lower():
-        if len(reader[0]) > 1 and (reader[0][1] or "").strip():
-            estimate_name = reader[0][1].strip()
-        if len(reader[0]) > 3:
-            currency_cell = (reader[0][3] or "").strip()
-            if currency_cell.lower() != "currency":
-                currency = currency_cell
-            elif len(reader[0]) > 4 and (reader[0][4] or "").strip():
-                currency = reader[0][4].strip()
-
-    header_idx = None
-    for i, row in enumerate(reader):
-        cells = [(c or "").strip().lower() for c in row]
-        if any("service" in c and "group" in c for c in cells):
-            header_idx = i
-            break
-        if any(c == "service" for c in cells):
-            header_idx = i
-            break
-    if header_idx is None:
-        return [], estimate_name, currency
-
-    header = reader[header_idx]
-    g_idx = _col_index(header, "group")
-    s_idx = _col_index(header, "service")
-    r_idx = _col_index(header, "region")
-    c_idx = _col_index(header, "configuration", "config", "description")
-    m_idx = _col_index(header, "monthly")
-    u_idx = _col_index(header, "upfront")
-
-    def cell(row: list[str], idx: int | None) -> str:
-        if idx is None or idx >= len(row):
-            return ""
-        return (row[idx] or "").strip()
-
-    def num(value: str) -> float:
-        try:
-            return float(value.replace(",", "").replace("$", "").replace(" ", ""))
-        except (TypeError, ValueError):
-            return 0.0
-
-    items: list[dict] = []
-    for row in reader[header_idx + 1 :]:
-        if not any((c or "").strip() for c in row):
-            continue
-        if (cell(row, s_idx or 0) or (cell(row, g_idx) if g_idx is not None else "")).upper() == "TOTAL":
-            break
-        if g_idx is not None and "total" in cell(row, g_idx).lower():
-            break
-        items.append(
-            {
-                "group": cell(row, g_idx),
-                "service": cell(row, s_idx),
-                "region": cell(row, r_idx),
-                "configuration": cell(row, c_idx),
-                "monthly": num(cell(row, m_idx)),
-                "upfront": num(cell(row, u_idx)),
-            }
-        )
-    items = [it for it in items if it["service"]]
-    return items, estimate_name, currency
-
-
-def _build_bom_xlsx(estimate_name: str, currency: str, items: list[dict]) -> bytes:
+def _build_bom_xlsx(
+    estimate_name: str,
+    currency: str,
+    items: list[dict],
+    sr_no: int | None = None,
+) -> bytes:
     """Render a Bill of Materials Excel workbook from the parsed estimate items."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -407,20 +322,25 @@ def _build_bom_xlsx(estimate_name: str, currency: str, items: list[dict]) -> byt
     teal = "0D9488"
     header_fill = PatternFill("solid", fgColor="1E293B")
     header_font = Font(color="FFFFFF", bold=True, size=10)
-    title_font = Font(color=navy, bold=True, size=13)
-    sub_font = Font(color="64748B", italic=True, size=9)
+    title_font = Font(bold=True, size=13, color=navy)
+    sub_font = Font(italic=True, size=9, color="64748B")
     thin = Side(style="thin", color="E2E8F0")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     money_fmt = "#,##0.00"
+    last_col = 6  # Sr. No, Service, Region, Description, Qty, Monthly
+    last_letter = get_column_letter(last_col)
 
-    ws.merge_cells("A1:H1")
+    ws.merge_cells(f"A1:{last_letter}1")
     ws["A1"] = f"Bill of Materials — {estimate_name}"
     ws["A1"].font = title_font
-    ws.merge_cells("A2:H2")
-    ws["A2"] = f"Source: AWS Pricing Calculator estimate · Currency: {currency} · {len(items)} line item(s)"
+    ws.merge_cells(f"A2:{last_letter}2")
+    ws["A2"] = (
+        f"Source: AWS Pricing Calculator estimate · Currency: {currency} · {len(items)} line item(s)"
+        + (f" · Sr. No: {sr_no}" if sr_no is not None else "")
+    )
     ws["A2"].font = sub_font
 
-    headers = ["#", "Group", "Service", "Region", "Description (configuration)", "Qty", "Monthly", "Upfront"]
+    headers = ["Sr. No", "Service", "Region", "Description (configuration)", "Qty", "Monthly"]
     for col, name in enumerate(headers, start=1):
         cell = ws.cell(row=4, column=col, value=name)
         cell.fill = header_fill
@@ -428,51 +348,36 @@ def _build_bom_xlsx(estimate_name: str, currency: str, items: list[dict]) -> byt
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = border
 
-    items_sorted = sorted(items, key=lambda it: (it["group"] or "", it["service"] or ""))
-    grouped: dict[str, list[dict]] = {}
-    for it in items_sorted:
-        grouped.setdefault(it["group"] or "General", []).append(it)
-
     row_idx = 5
-    seq = 0
-    total_monthly = total_upfront = 0.0
-    for group, group_items in grouped.items():
-        start = row_idx
-        for it in group_items:
-            seq += 1
-            total_monthly += it["monthly"]
-            total_upfront += it["upfront"]
-            values = [seq, it["group"], it["service"], it["region"], it["configuration"], 1, it["monthly"], it["upfront"]]
-            for col, value in enumerate(values, start=1):
-                cell = ws.cell(row=row_idx, column=col, value=value)
-                cell.border = border
-                cell.font = Font(size=9)
-                cell.alignment = Alignment(vertical="top", wrap_text=(col == 5))
-                if col in (7, 8):
-                    cell.number_format = money_fmt
-            row_idx += 1
-        last = row_idx - 1
-        ws.merge_cells(start_row=start, start_column=2, end_row=last, end_column=2)
-        ws.cell(row=start, column=2, value=group).font = Font(bold=True, size=9)
-        ws.cell(row=start, column=2).alignment = Alignment(vertical="center")
+    total_monthly = 0.0
+    for it in sorted(items, key=lambda it: (it["group"] or "", it["service"] or "")):
+        total_monthly += it["monthly"]
+        values = [sr_no, it["service"], it["region"], it["configuration"], 1, it["monthly"]]
+        for col, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col, value=value)
+            cell.border = border
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(vertical="top", wrap_text=(col == 4))
+            if col == 6:
+                cell.number_format = money_fmt
+        row_idx += 1
 
-    ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=6)
+    ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=5)
     total_cell = ws.cell(row=row_idx, column=1, value="TOTAL")
     total_cell.font = Font(bold=True, size=10, color=teal)
-    for col, value in [(7, total_monthly), (8, total_upfront)]:
-        cell = ws.cell(row=row_idx, column=col, value=value)
-        cell.number_format = money_fmt
-        cell.font = Font(bold=True, size=10, color=teal)
-    for col in range(1, 9):
+    cell = ws.cell(row=row_idx, column=6, value=total_monthly)
+    cell.number_format = money_fmt
+    cell.font = Font(bold=True, size=10, color=teal)
+    for col in range(1, last_col + 1):
         ws.cell(row=row_idx, column=col).border = border
         ws.cell(row=row_idx, column=col).fill = PatternFill("solid", fgColor="ECFDF5")
     ws.cell(row=row_idx, column=1).font = Font(bold=True, size=10, color=teal)
 
-    widths = [5, 14, 30, 18, 55, 6, 12, 12]
+    widths = [9, 32, 20, 60, 6, 13]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A5"
-    ws.auto_filter.ref = f"A4:H{row_idx - 1 if row_idx > 5 else 4}"
+    ws.auto_filter.ref = f"A4:{last_letter}{row_idx - 1 if row_idx > 5 else 4}"
 
     out = BytesIO()
     wb.save(out)
@@ -486,9 +391,13 @@ def aws_calculator_import_sync(
     username: str,
     with_bom: bool = True,
 ) -> dict:
-    """Download the AWS Calculator CSV + PDF for a customer, attach them (plus
-    an optional BOM spreadsheet generated from the CSV) to the customer's
-    documents, and record a history entry.
+    """Fetch the AWS Calculator estimate for a customer once, then attach the
+    artefacts to the customer's documents: a CSV export, the estimate PDF, and
+    a Bill of Materials workbook built from the estimate itself.
+
+    The BOM is derived from the estimate read off the share link - it is never
+    parsed out of the CSV, so a change to the AWS export layout cannot silently
+    produce an empty or wrong Bill of Materials.
 
     Runs synchronously — caller decides whether to execute it in a thread.
     """
@@ -498,12 +407,14 @@ def aws_calculator_import_sync(
 
     customer.aws_calculator_link = link
 
-    import shutil
-    import tempfile
-
     from ..services.aws_calculator import (
-        download_estimate_csv,
-        download_from_calculator_pdf_sync,
+        estimate_from_link,
+        estimate_to_bom_items,
+        estimate_to_csv,
+        estimate_to_pdf_html,
+        html_to_pdf_sync,
+        parse_estimate_id,
+        service_names,
     )
 
     backend = get_setting(db, "storage.backend", "local")
@@ -514,92 +425,90 @@ def aws_calculator_import_sync(
     for ch in ['"', "*", ":", "<", ">", "?", "/", "\\", "|"]:
         safe_name = safe_name.replace(ch, "_")
 
-    tmp_dir = tempfile.mkdtemp(prefix="aws_calc_")
     errors: list[str] = []
-    csv_path: str | None = None
-    pdf_path: str | None = None
     imported: list[str] = []
-    csv_text: str | None = None
     bom_doc: CustomerDocument | None = None
 
+    # --- helper to persist a file as a customer document -------------------
+    def _store(data: bytes, orig_name: str, mime: str, desc: str) -> CustomerDocument:
+        prefix = uuid.uuid4().hex[:8]
+        stored_name = f"{customer.id}_{prefix}_{orig_name}"
+        save_path = os.path.join(dirpath, stored_name)
+        with open(save_path, "wb") as fh:
+            fh.write(data)
+        doc = CustomerDocument(
+            customer_id=customer.id,
+            original_filename=orig_name,
+            stored_filename=stored_name,
+            file_path=save_path,
+            storage_backend="onedrive" if backend == "onedrive" else "local",
+            blob_url=onedrive_link if backend == "onedrive" else None,
+            file_size_bytes=len(data),
+            mime_type=mime,
+            description=desc,
+            uploaded_by=username,
+            created_at=now(),
+        )
+        db.add(doc)
+        db.flush()
+        return doc
+
+    # --- one fetch of the estimate, shared by the CSV and the BOM -------
+    estimate: dict | None = None
+    names: dict[str, str] = {}
     try:
-        # --- download CSV + PDF via headless browser ----------------------
-        try:
-            csv_path = download_estimate_csv(link, tmp_dir)
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"CSV: {exc}")
-        try:
-            pdf_path = download_from_calculator_pdf_sync(link, tmp_dir)
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"PDF: {exc}")
+        estimate = estimate_from_link(link)
+        names = service_names()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Estimate: {exc}")
 
-        # --- helper to persist a file as a customer document ---------------
-        def _store(data: bytes, orig_name: str, mime: str, desc: str) -> CustomerDocument:
-            prefix = uuid.uuid4().hex[:8]
-            stored_name = f"{customer.id}_{prefix}_{orig_name}"
-            save_path = os.path.join(dirpath, stored_name)
-            with open(save_path, "wb") as fh:
-                fh.write(data)
-            doc = CustomerDocument(
-                customer_id=customer.id,
-                original_filename=orig_name,
-                stored_filename=stored_name,
-                file_path=save_path,
-                storage_backend="onedrive" if backend == "onedrive" else "local",
-                blob_url=onedrive_link if backend == "onedrive" else None,
-                file_size_bytes=len(data),
-                mime_type=mime,
-                description=desc,
-                uploaded_by=username,
-                created_at=now(),
-            )
-            db.add(doc)
-            db.flush()
-            return doc
-
-        # --- store CSV -----------------------------------------------------
-        if csv_path and os.path.exists(csv_path):
-            with open(csv_path, "rb") as fh:
-                csv_bytes = fh.read()
-            csv_text = csv_bytes.decode("utf-8-sig", errors="replace")
+    if estimate is not None:
+        # --- CSV artefact (for the customer, not the BOM source) --------
+        try:
+            csv_bytes = estimate_to_csv(estimate, names).encode("utf-8")
+            estimate_id = parse_estimate_id(link) or "estimate"
             doc = _store(
                 csv_bytes,
-                os.path.basename(csv_path),
+                f"AWS-Calculator-{estimate_id[:12]}.csv",
                 "text/csv",
                 "AWS Calculator CSV (auto-downloaded)",
             )
             imported.append(doc.original_filename)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"CSV: {exc}")
 
-        # --- store PDF -----------------------------------------------------
-        if pdf_path and os.path.exists(pdf_path):
-            with open(pdf_path, "rb") as fh:
-                pdf_bytes = fh.read()
-            doc = _store(
-                pdf_bytes,
-                os.path.basename(pdf_path),
-                "application/pdf",
-                "AWS Calculator PDF (auto-downloaded)",
-            )
-            imported.append(doc.original_filename)
-
-        # --- generate BOM from CSV -----------------------------------------
-        if with_bom and csv_text:
+        # --- BOM straight from the estimate -----------------------------
+        if with_bom:
             try:
-                items, estimate_name, currency = _parse_aws_calc_csv(csv_text)
-                if items:
-                    bom_bytes = _build_bom_xlsx(estimate_name, currency, items)
+                items, estimate_name, currency = estimate_to_bom_items(estimate, names)
+                if not items:
+                    errors.append("BOM: the estimate contains no services")
+                else:
                     bom_filename = f"BOM-{safe_name}-{uuid.uuid4().hex[:6]}.xlsx"
                     bom_doc = _store(
-                        bom_bytes,
+                        _build_bom_xlsx(estimate_name, currency, items, customer.sr_no),
                         bom_filename,
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        f"BOM auto-generated from AWS Calculator ({len(items)} items, {currency})",
+                        XLSX_MIME,
+                        f"Bill of Materials from AWS Pricing Calculator estimate "
+                        f"'{estimate_name}' ({len(items)} item(s), {currency})",
                     )
                     imported.append(bom_doc.original_filename)
-            except Exception:
-                pass
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"BOM: {exc}")
+
+        # --- estimate PDF rendered from the same estimate ----------------
+        try:
+            pdf_bytes = html_to_pdf_sync(estimate_to_pdf_html(estimate, names, customer.sr_no))
+            estimate_id = parse_estimate_id(link) or "estimate"
+            doc = _store(
+                pdf_bytes,
+                f"estimate-{estimate_id}.pdf",
+                "application/pdf",
+                "AWS Pricing Calculator estimate (PDF)",
+            )
+            imported.append(doc.original_filename)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"PDF: {exc}")
 
     # --- history entry -----------------------------------------------------
     hist = OpportunityHistory()
@@ -633,8 +542,8 @@ async def aws_calculator_import(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Download CSV + PDF from an AWS Calculator share link and store them
-    (plus a BOM generated from the CSV) as customer documents."""
+    """Fetch the estimate behind an AWS Calculator share link and store the CSV
+    export, the PDF and a BOM built from the estimate as customer documents."""
     customer = db.get(Customer, customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -654,33 +563,44 @@ async def aws_calculator_import(
 @router.post("/bom/generate", response_model=CustomerDocumentOut, status_code=status.HTTP_201_CREATED)
 async def generate_bom(
     customer_id: int = Query(...),
-    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Build a Bill of Materials (Excel) from an uploaded AWS calculator CSV and store it for the customer."""
+    """Build a Bill of Materials workbook from the customer's AWS Pricing Calculator link.
+
+    The estimate is read straight from the share link already on the customer
+    record - there is no CSV upload and no dependency on an exported file.
+    """
+    from ..services.aws_calculator import bom_items_from_link
+
     customer = db.get(Customer, customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=422, detail="Empty file")
+    link = (customer.aws_calculator_link or "").strip()
+    if not link:
+        raise HTTPException(
+            status_code=422,
+            detail="This customer has no AWS Pricing Calculator link. Add one to the customer first.",
+        )
 
+    # network-bound: keep it off the event loop
     try:
-        text = content.decode("utf-8-sig", errors="replace")
+        items, estimate_name, currency = await asyncio.to_thread(bom_items_from_link, link)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=422, detail="Could not read CSV") from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not read the AWS Pricing Calculator estimate: {exc}",
+        ) from exc
 
-    items, estimate_name, currency = _parse_aws_calc_csv(text)
     if not items:
         raise HTTPException(
             status_code=422,
-            detail="Could not find any services in the CSV. Make sure it is an AWS Pricing Calculator CSV export.",
+            detail="The AWS Pricing Calculator estimate contains no services.",
         )
 
     try:
-        bom_bytes = _build_bom_xlsx(estimate_name, currency, items)
+        bom_bytes = _build_bom_xlsx(estimate_name, currency, items, customer.sr_no)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not build BOM workbook: {exc}") from exc
 
@@ -691,8 +611,7 @@ async def generate_bom(
     safe_name = f"{customer.customer_name or 'customer'}"
     for ch in ['"', "*", ":", "<", ">", "?", "/", "\\", "|"]:
         safe_name = safe_name.replace(ch, "_")
-    base = f"BOM-{safe_name}-{uuid.uuid4().hex[:6]}"
-    filename = f"{base}.xlsx"
+    filename = f"BOM-{safe_name}-{uuid.uuid4().hex[:6]}.xlsx"
     prefix = uuid.uuid4().hex[:8]
     stored_name = f"{customer.id}_{prefix}_{filename}"
     file_path = os.path.join(dirpath, stored_name)
@@ -707,8 +626,9 @@ async def generate_bom(
         storage_backend="onedrive" if backend == "onedrive" else "local",
         blob_url=onedrive_link if backend == "onedrive" else None,
         file_size_bytes=len(bom_bytes),
-        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        description=f"Bill of Materials from '{estimate_name}' ({len(items)} item(s), {currency})",
+        mime_type=XLSX_MIME,
+        description=f"Bill of Materials from AWS Pricing Calculator estimate "
+        f"'{estimate_name}' ({len(items)} item(s), {currency})",
         uploaded_by=current_user.username,
         created_at=now(),
     )

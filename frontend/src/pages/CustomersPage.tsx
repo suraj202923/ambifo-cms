@@ -9,6 +9,8 @@ import { buildStarterXml } from '../lib/drawio'
 
 const PAGE_SIZE = 20
 
+type SortKey = 'srno' | 'name' | 'status' | 'updated'
+
 const LEAD_TRACKER_URL =
   'https://ambifo-my.sharepoint.com/:x:/r/personal/nilesh_ambifo_com/_layouts/15/doc2.aspx?sourcedoc=%7B3674F7FE-6F20-46CB-81A8-3F9A3D03E4AC%7D&file=Master%20Lead%20Tracker-Ambifo_07Jun26.xlsx&action=default&mobileredirect=true&wdOrigin=OUTLOOK-METAOS.FILEBROWSER'
 
@@ -89,8 +91,8 @@ export default function CustomersPage() {
   const [importMode, setImportMode] = useState<'link' | 'file'>('link')
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importUpdateExisting, setImportUpdateExisting] = useState(true)
-  const [sortKey, setSortKey] = useState<'name' | 'status' | 'updated'>('name')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [sortKey, setSortKey] = useState<SortKey>('srno')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const lookups = useQuery({ queryKey: ['lookups'], queryFn: customerApi.lookups })
   const { data: customers, isLoading, isError } = useQuery({
@@ -265,22 +267,23 @@ export default function CustomersPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const pageCustomers = customers ? [...customers].sort((a, b) => {
     let cmp = 0
-    if (sortKey === 'name') cmp = (a.customer_name ?? '').localeCompare(b.customer_name ?? '')
+    if (sortKey === 'srno') cmp = (a.sr_no ?? 0) - (b.sr_no ?? 0)
+    else if (sortKey === 'name') cmp = (a.customer_name ?? '').localeCompare(b.customer_name ?? '')
     else if (sortKey === 'status') cmp = (a.deal_status ?? '').localeCompare(b.deal_status ?? '')
     else if (sortKey === 'updated') cmp = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
     return sortDir === 'asc' ? cmp : -cmp
   }) : []
   const allSelected = !!pageCustomers.length && pageCustomers.every((c) => selectedIds.has(c.id))
 
-  function toggleSort(key: 'name' | 'status' | 'updated') {
+  function toggleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortKey(key)
-      setSortDir('asc')
+      setSortDir(key === 'srno' || key === 'updated' ? 'desc' : 'asc')
     }
   }
-  const sortArrow = (key: 'name' | 'status' | 'updated') =>
+  const sortArrow = (key: SortKey) =>
     sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
 
   function formatRelative(iso: string) {
@@ -738,6 +741,9 @@ export default function CustomersPage() {
                       {allSelected ? <CheckSquare size={17} /> : <Square size={17} />}
                     </button>
                   </th>
+                  <th className="px-5 py-3.5 w-20">
+                    <button type="button" className="hover:text-brand-teal-dark" onClick={() => toggleSort('srno')} title="Serial number (newest first)">Sr. No.{sortArrow('srno')}</button>
+                  </th>
                   <th className="px-5 py-3.5">
                     <button type="button" className="hover:text-brand-teal-dark" onClick={() => toggleSort('name')}>Name{sortArrow('name')}</button>
                   </th>
@@ -764,6 +770,11 @@ export default function CustomersPage() {
                         <button type="button" className="text-slate-300 transition-colors hover:text-brand-teal" onClick={() => toggleSelect(c.id)}>
                           {selectedIds.has(c.id) ? <CheckSquare size={17} /> : <Square size={17} />}
                         </button>
+                      </td>
+                      <td className="px-5 py-3.5 w-20">
+                        <span className="inline-grid h-7 min-w-7 place-items-center rounded-lg bg-slate-100 px-1.5 font-display text-xs font-bold text-navy-700">
+                          {c.sr_no ?? '—'}
+                        </span>
                       </td>
                       <td className="px-5 py-3.5 max-w-[220px]">
                         <Link to={`/customers/${c.id}`} className="group flex items-center gap-2.5">

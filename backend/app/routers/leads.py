@@ -10,6 +10,7 @@ from ..deps import get_current_user
 from ..models.crm import Customer, Lead
 from ..models.user import User
 from ..schemas.crm import CustomerCreate, LeadCreate, LeadOut, LeadUpdate
+from ..services.numbering import assign_sr_no
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 
@@ -155,6 +156,7 @@ def convert_lead(
         deal_status="Qualified",
         opportunity_id=f"OPP-{lead.id}",
     )
+    assign_sr_no(db, customer)
     db.add(customer)
     db.flush()
     lead.converted_customer_id = customer.id

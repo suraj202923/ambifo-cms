@@ -5,7 +5,7 @@ import { customerApi, diagramApi, documentApi } from '../api'
 import type { Diagram } from '../api/types'
 import { Badge, Button, EmptyState, Field, inputCls, PageHead, Panel, selectCls, Spinner } from '../components/ui'
 import { DrawioEditorModal } from '../components/DrawioEditorModal'
-import { buildStarterXml } from '../lib/drawio'
+import { AWS_REGIONS, buildStarterXml } from '../lib/drawio'
 
 function formatRelative(iso: string): string {
   const d = new Date(iso)
@@ -39,7 +39,7 @@ export default function DiagramsPage() {
   const customers = useQuery({ queryKey: ['customers'], queryFn: () => customerApi.list({ limit: 200 }) })
   const diagrams = useQuery({ queryKey: ['diagrams'], queryFn: () => diagramApi.list() })
 
-  const [form, setForm] = useState({ customer_id: '', diagram_name: '', aws_calculator_link: '' })
+  const [form, setForm] = useState({ customer_id: '', diagram_name: '', aws_calculator_link: '', region: 'us-east-1' })
   const [error, setError] = useState<string | null>(null)
   const [docNote, setDocNote] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
@@ -56,8 +56,8 @@ export default function DiagramsPage() {
   }
 
   const starterXml = useMemo(
-    () => (editor?.mode === 'create' ? buildStarterXml(customerName(Number(form.customer_id)) || 'Client', form.aws_calculator_link?.trim() ?? '') : null),
-    [editor, form.customer_id, form.aws_calculator_link, customerName],
+    () => (editor?.mode === 'create' ? buildStarterXml(customerName(Number(form.customer_id)) || 'Client', form.aws_calculator_link?.trim() ?? '', form.region) : null),
+    [editor, form.customer_id, form.aws_calculator_link, form.region, customerName],
   )
 
   const visibleDiagrams = useMemo(
@@ -76,7 +76,7 @@ export default function DiagramsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['diagrams'] })
       setEditor(null)
-      setForm({ customer_id: '', diagram_name: '', aws_calculator_link: '' })
+      setForm({ customer_id: '', diagram_name: '', aws_calculator_link: '', region: 'us-east-1' })
     },
     onError: (e) => setError(e instanceof Error ? e.message : 'Save failed'),
   })
@@ -182,11 +182,18 @@ export default function DiagramsPage() {
                 )}
               </div>
             </Field>
+            <Field label="AWS region">
+              <select className={selectCls} value={form.region} onChange={(e) => setForm((f) => ({ ...f, region: e.target.value }))}>
+                {AWS_REGIONS.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </Field>
             <Button icon={<GitBranch size={15} />} onClick={openEditor}>
               Open draw.io editor
             </Button>
             <p className="text-xs text-slate-400">
-              A starter architecture flow is pre-loaded in the draw.io editor — drag AWS services from the left shape library onto the canvas. <b>Save &amp; close</b> stores the diagram here; <b>Save + attach to docs</b> also embeds an image of it in the customer's Documents.
+              A full two-tier AWS reference architecture is pre-loaded in the draw.io editor — global edge (Route&nbsp;53, WAF, CloudFront, S3) plus a VPC with real public, private-app and private-data subnets across 2 AZs, NAT egress, security-group notes and edge labels. Drag AWS services from the left shape library to extend it. <b>Save &amp; close</b> stores the diagram here; <b>Save + attach to docs</b> also embeds an image of it in the customer's Documents.
             </p>
             {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">⚠ {error}</div>}
             {docNote && (

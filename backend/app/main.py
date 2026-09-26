@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine)
         ensure_column("customer_diagrams", "aws_calculator_link", "VARCHAR(500)")
         ensure_column("customers", "designation", "VARCHAR(120)")
+        ensure_column("customers", "sr_no", "INTEGER")
         db = SessionLocal()
         try:
             seed_lookups(db)
@@ -57,6 +58,8 @@ async def lifespan(app: FastAPI):
             ensure_default_admin(db)
             from .services.email_worker import normalize_pending
             normalize_pending(db)
+            from .services.numbering import backfill_sr_no
+            backfill_sr_no(db)
         finally:
             db.close()
     finally:

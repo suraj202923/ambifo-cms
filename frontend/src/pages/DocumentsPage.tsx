@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, ExternalLink, Eye, FileArchive, FileImage, FileSpreadsheet, FileText, Film, FolderUp, Mail, Search, Trash2, Upload, X } from 'lucide-react'
+import { Download, ExternalLink, Eye, FileArchive, FileImage, FileSpreadsheet, FileText, Film, FolderUp, Mail, Search, Trash2 } from 'lucide-react'
 import { customerApi, documentApi } from '../api'
 import { Button, Badge, EmptyState, Field, FilePreviewModal, inputCls, PageHead, Panel, selectCls, Spinner, isTextPreview } from '../components/ui'
 
@@ -76,17 +76,21 @@ function SowTab() {
 
   const [selected, setSelected] = useState<number | null>(null)
 
-  const [csvFile, setCsvFile] = useState<File | null>(null)
-  const [csvCustomerId, setCsvCustomerId] = useState('')
-  const [csvError, setCsvError] = useState<string | null>(null)
-  const [csvDone, setCsvDone] = useState<string | null>(null)
-  const csvRef = useRef<HTMLInputElement>(null)
+  const [bomCustomerId, setBomCustomerId] = useState('')
+  const [bomError, setBomError] = useState<string | null>(null)
+  const [bomDone, setBomDone] = useState<string | null>(null)
 
   const customerName = useMemo(() => {
     const map = new Map<number, string>()
     customers.data?.forEach((c) => map.set(c.id, c.customer_name))
     return (id: number) => map.get(id) ?? `Customer #${id}`
   }, [customers.data])
+
+  const bomLink = useMemo(() => {
+    const id = Number(bomCustomerId)
+    if (!id) return null
+    return customers.data?.find((c) => c.id === id)?.aws_calculator_link?.trim() || null
+  }, [bomCustomerId, customers.data])
 
   const sowKpis = useMemo(() => {
     const list = sows.data ?? []
@@ -113,18 +117,18 @@ function SowTab() {
 
   const bomMutation = useMutation({
     mutationFn: () => {
-      if (!csvFile) throw new Error('Choose a CSV file first')
-      return documentApi.generateBom(Number(csvCustomerId), csvFile)
+      if (!bomCustomerId) throw new Error('Choose a customer first')
+      return documentApi.generateBom(Number(bomCustomerId))
     },
     onSuccess: (doc) => {
       queryClient.invalidateQueries({ queryKey: ['customer-documents'] })
-      setCsvDone(`BOM saved to ${customerName(doc.customer_id)}'s documents (${doc.original_filename})`)
-      setCsvError(null)
-      setCsvFile(null)
-      setCsvCustomerId('')
-      if (csvRef.current) csvRef.current.value = ''
+      setBomDone(`BOM saved to ${customerName(doc.customer_id)}'s documents (${doc.original_filename})`)
+      setBomError(null)
     },
-    onError: (e) => setCsvError(e instanceof Error ? e.message : 'BOM generation failed'),
+    onError: (e) => {
+      setBomError(e instanceof Error ? e.message : 'BOM generation failed')
+      setBomDone(null)
+    },
   })
 
   return (
@@ -135,56 +139,58 @@ function SowTab() {
         </h2>
 
         <div className="rounded-2xl border border-brand-teal/20 bg-brand-teal/5 p-4">
-          <div className="mb-3 font-display text-xs font-bold tracking-wide text-brand-teal-dark uppercase">
-            BOM from AWS calculator CSV → Excel
+          <div className="mb-1 font-display text-xs font-bold tracking-wide text-brand-teal-dark uppercase">
+            BOM from AWS calculator link → Excel
           </div>
+          <p className="mb-3 text-xs text-slate-500">
+            Reads the estimate directly from the customer's AWS Pricing Calculator link. No CSV needed.
+          </p>
 
-          <input
-            ref={csvRef}
-            type="file"
-            accept=".csv,text/csv,text/plain"
-            className="hidden"
-            onChange={(e) => {
-              setCsvDone(null)
-              setCsvError(null)
-              const f = e.target.files?.[0]
-              if (f) setCsvFile(f)
-            }}
-          />
-          {csvFile && (
-            <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
-              <div className="flex min-w-0 items-center gap-2 text-sm">
-                <FileSpreadsheet size={15} className="shrink-0 text-brand-teal" />
-                <span className="truncate font-semibold text-navy-900">{csvFile.name}</span>
-                <span className="text-xs text-slate-400">({(csvFile.size / 1024).toFixed(1)} KB)</span>
-              </div>
-              <button className="text-slate-400 transition-colors hover:text-red-500" onClick={() => { setCsvFile(null); if (csvRef.current) csvRef.current.value = '' }}>
-                <X size={15} />
-              </button>
+          <Field label="Customer *">
+            <select
+              className={selectCls}
+              value={bomCustomerId}
+              onChange={(e) => {
+                setBomDone(null)
+                setBomError(null)
+                setBomCustomerId(e.target.value)
+              }}
+            >
+              <option value="">— select customer —</option>
+              {customers.data?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.customer_name}
+                  {c.aws_calculator_link ? '' : '  (no calculator link)'}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {bomCustomerId && !bomLink && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              ⚠ This customer has no AWS Pricing Calculator link. Add one on the customer record first.
             </div>
           )}
-          <Button variant="outline" className="w-full !py-2 text-xs" icon={<Upload size={14} />} onClick={() => csvRef.current?.click()}>
-            {csvFile ? 'Replace CSV' : 'Upload AWS calculator CSV'}
-          </Button>
 
-          <div className="mt-3">
-            <Field label="Customer *">
-              <select className={selectCls} value={csvCustomerId} onChange={(e) => { setCsvDone(null); setCsvCustomerId(e.target.value) }}>
-                <option value="">— select customer —</option>
-                {customers.data?.map((c) => (
-                  <option key={c.id} value={c.id}>{c.customer_name}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
+          {bomLink && (
+            <a
+              href={bomLink}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 flex items-center gap-1.5 break-all text-xs text-brand-teal-dark hover:underline"
+            >
+              <ExternalLink size={12} className="shrink-0" />
+              {bomLink}
+            </a>
+          )}
 
-          {csvError && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">⚠ {csvError}</div>}
-          {csvDone && <div className="mt-3 rounded-xl border border-brand-teal/25 bg-brand-teal/10 px-4 py-3 text-sm text-brand-teal-dark">✓ {csvDone}</div>}
+          {bomError && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">⚠ {bomError}</div>}
+          {bomDone && <div className="mt-3 rounded-xl border border-brand-teal/25 bg-brand-teal/10 px-4 py-3 text-sm text-brand-teal-dark">✓ {bomDone}</div>}
 
           <Button
             className="mt-4 w-full"
             icon={<FileSpreadsheet size={15} />}
-            disabled={bomMutation.isPending || !csvFile || !csvCustomerId}
+            disabled={bomMutation.isPending || !bomCustomerId || !bomLink}
             onClick={() => bomMutation.mutate()}
           >
             {bomMutation.isPending ? 'Generating BOM…' : 'Generate BOM (Excel)'}

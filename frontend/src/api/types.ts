@@ -41,16 +41,17 @@ export interface Customer {
   opportunity_id: string | null
   segment: string | null
   deal_status: string | null
-comment: string | null
+  comment: string | null
   next_action_planned: string | null
   assign_to_user_id: number | null
+  sr_no: number | null
   created_at: string
   updated_at: string
 }
 
 export type CustomerCreate = Omit<
   Customer,
-  'id' | 'created_at' | 'updated_at'
+  'id' | 'sr_no' | 'created_at' | 'updated_at'
 >
 
 export type CustomerUpdate = Partial<CustomerCreate>
