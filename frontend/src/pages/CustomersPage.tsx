@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { BadgeDollarSign, Briefcase, Building2, Calculator, CalendarClock, CheckSquare, ChevronLeft, ChevronRight, Cloud, CreditCard, Download, ExternalLink, FileSpreadsheet, FileText, GitBranch, Globe, Layers, Mail, MapPin, MessageSquareText, Pencil, Phone, Plus, Search, Square, Tag, Trash2, TrendingUp, Trophy, Upload, UserCheck, Users, X } from 'lucide-react'
+import { BadgeDollarSign, Briefcase, Building2, Calculator, CalendarClock, CheckSquare, ChevronLeft, ChevronRight, Cloud, CreditCard, Download, ExternalLink, FileSpreadsheet, FileText, GitBranch, Globe, Layers, Mail, MapPin, MessageSquareText, Pencil, Phone, Plus, Square, Tag, Trash2, TrendingUp, Trophy, Upload, UserCheck, Users, X } from 'lucide-react'
 import { customerApi, diagramApi, documentApi, importApi } from '../api'
 import type { Customer, CustomerCreate, CustomerStats, Lookups } from '../api/types'
 import { Badge, Button, EmptyState, Field, inputCls, PageHead, selectCls, Spinner } from '../components/ui'
@@ -13,15 +13,6 @@ type SortKey = 'srno' | 'name' | 'status' | 'updated'
 
 const LEAD_TRACKER_URL =
   'https://ambifo-my.sharepoint.com/:x:/r/personal/nilesh_ambifo_com/_layouts/15/doc2.aspx?sourcedoc=%7B3674F7FE-6F20-46CB-81A8-3F9A3D03E4AC%7D&file=Master%20Lead%20Tracker-Ambifo_07Jun26.xlsx&action=default&mobileredirect=true&wdOrigin=OUTLOOK-METAOS.FILEBROWSER'
-
-function useDebounced<T>(value: T, delay = 300): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(t)
-  }, [value, delay])
-  return debounced
-}
 
 const EMPTY_FORM: CustomerCreate = {
   account_name: '',
@@ -69,8 +60,6 @@ function toForm(c: Customer): CustomerCreate {
 
 export default function CustomersPage() {
   const queryClient = useQueryClient()
-  const [search, setSearch] = useState('')
-  const debouncedSearch = useDebounced(search)
   const [page, setPage] = useState(1)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Customer | null>(null)
@@ -96,12 +85,12 @@ export default function CustomersPage() {
 
   const lookups = useQuery({ queryKey: ['lookups'], queryFn: customerApi.lookups })
   const { data: customers, isLoading, isError } = useQuery({
-    queryKey: ['customers', debouncedSearch, page],
-    queryFn: () => customerApi.list({ search: debouncedSearch || undefined, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    queryKey: ['customers', page],
+    queryFn: () => customerApi.list({ limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
   })
   const { data: stats } = useQuery<CustomerStats>({
-    queryKey: ['customer-stats', debouncedSearch],
-    queryFn: () => customerApi.stats(debouncedSearch || undefined),
+    queryKey: ['customer-stats'],
+    queryFn: () => customerApi.stats(),
   })
 
   const createMutation = useMutation({
@@ -171,7 +160,6 @@ export default function CustomersPage() {
     onSuccess: (data) => {
       setConfirmRemoveAll(false)
       setDeleteError(null)
-      setSearch('')
       setPage(1)
       setSelectedIds(new Set())
       queryClient.invalidateQueries({ queryKey: ['customers'] })
@@ -207,7 +195,7 @@ export default function CustomersPage() {
     mutationFn: () =>
       customerApi.bulkUpdate({
         customer_ids: bulkAllFilter ? [] : [...selectedIds],
-        filter_search: bulkAllFilter ? (debouncedSearch || null) : undefined,
+        apply_to_all: bulkAllFilter,
         deal_status: bulkStatus || null,
         segment: bulkSegment || null,
         assign_to_user_id: bulkAssignee ? Number(bulkAssignee) : null,
@@ -604,19 +592,7 @@ export default function CustomersPage() {
       {!showForm && (
         <>
       <div className="stagger mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[220px]">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            className={`${inputCls} pl-9`}
-            placeholder="Search name, email, city, opp ID…"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value)
-              setPage(1)
-            }}
-          />
-        </div>
-        {search && customers && customers.length > 0 && (
+        {customers && customers.length > 0 && (
           <Button
             variant="ghost"
             icon={<CheckSquare size={15} />}
@@ -626,7 +602,7 @@ export default function CustomersPage() {
               window.scrollTo({ top: window.scrollY, behavior: 'smooth' })
             }}
           >
-            Bulk-edit all matching
+            Bulk-edit all customers
           </Button>
         )}
         {(total > 0) && (
@@ -656,12 +632,8 @@ export default function CustomersPage() {
               }}
               className="h-4 w-4 accent-brand-teal"
             />
-            Apply to all matching current filter
-            {search ? (
-              <span className="text-brand-teal-dark">("{search}")</span>
-            ) : (
-              <span className="text-slate-400">(all customers)</span>
-            )}
+            Apply to all customers
+            <span className="text-slate-400">({total} total)</span>
           </label>
           <select className={`${selectCls} w-auto`} value={bulkSegment} onChange={(e) => setBulkSegment(e.target.value)}>
             <option value="">Set segment…</option>

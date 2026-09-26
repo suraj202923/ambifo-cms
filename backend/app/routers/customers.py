@@ -402,6 +402,9 @@ def bulk_update_customers(
             q = q.filter(Customer.segment == payload.filter_segment)
         if payload.filter_deal_status:
             q = q.filter(Customer.deal_status == payload.filter_deal_status)
+    elif payload.apply_to_all:
+        # No filter_* terms and no explicit id list: every customer is in scope.
+        pass
     else:
         q = q.filter(Customer.id.in_(payload.customer_ids))
     customers = q.all()

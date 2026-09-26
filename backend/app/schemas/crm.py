@@ -81,6 +81,7 @@ class HistoryCreate(BaseModel):
 
 class BulkUpdate(BaseModel):
     customer_ids: list[int] = []
+    apply_to_all: bool = False
     filter_search: str | None = None
     filter_segment: str | None = None
     filter_deal_status: str | None = None

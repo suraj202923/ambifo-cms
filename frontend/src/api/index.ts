@@ -94,7 +94,7 @@ export const customerApi = {
 financials: (id: number) => api<Financial>(`/api/customers/${id}/financials`),
   updateFinancials: (id: number, payload: Partial<Financial>) =>
     api<Financial>(`/api/customers/${id}/financials`, { method: 'PUT', body: payload }),
-  bulkUpdate: (payload: { customer_ids?: number[]; filter_search?: string | null; filter_segment?: string | null; filter_deal_status?: string | null; deal_status?: string | null; segment?: string | null; assign_to_user_id?: number | null }) =>
+  bulkUpdate: (payload: { customer_ids?: number[]; apply_to_all?: boolean; filter_search?: string | null; filter_segment?: string | null; filter_deal_status?: string | null; deal_status?: string | null; segment?: string | null; assign_to_user_id?: number | null }) =>
     api<{ updated: number }>('/api/customers/bulk/update', { method: 'POST', body: payload }),
   stats: (search?: string) => {
     const qs = search && search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''
