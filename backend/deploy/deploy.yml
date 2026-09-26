@@ -413,7 +413,11 @@
         dest: "{{ backend_dir }}/.env"
         owner: "{{ app_user }}"
         group: "{{ app_group }}"
-        mode: "0640"
+        # 0600, not 0640: app_group is www-data, the nginx worker group, so
+        # group-read would expose SECRET_KEY, DATABASE_URL, SMTP_PASSWORD and
+        # DEFAULT_ADMIN_PASSWORD to every nginx process. Only the API and the
+        # worker (both User={{ app_user }}) need to read this file.
+        mode: "0600"
         content: |
           APP_NAME=Ambifo CRM API
           DATABASE_URL={{ database_url }}
@@ -498,7 +502,11 @@
           User={{ app_user }}
           Group={{ app_group }}
           WorkingDirectory={{ backend_dir }}
-          Environment=PATH={{ venv_dir }}/bin
+          # Keep the system PATH and *append* the venv. Setting PATH to the venv
+          # alone strips /usr/bin and /bin, which breaks Playwright's driver
+          # resolution and any future subprocess call from the service while the
+          # same call still works over SSH.
+          Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:{{ venv_dir }}/bin
           ExecStart={{ venv_dir }}/bin/uvicorn app.main:app \
               --host {{ api_host }} \
               --port {{ api_port }} \
@@ -556,7 +564,8 @@
           User={{ app_user }}
           Group={{ app_group }}
           WorkingDirectory={{ backend_dir }}
-          Environment=PATH={{ venv_dir }}/bin
+          # Keep the system PATH and *append* the venv (see ambifo-api.service).
+          Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:{{ venv_dir }}/bin
           ExecStart={{ venv_dir }}/bin/python run_worker.py
           Restart=always
           RestartSec=5
@@ -611,7 +620,9 @@
         dest: "{{ backup_script }}"
         owner: root
         group: root
-        mode: "0755"
+        # 0700: the script body embeds PGPASSWORD, so it must not be
+        # world-readable. It is executed by the root-owned systemd timer.
+        mode: "0700"
         content: |
           #!/bin/bash
           set -euo pipefail
@@ -785,7 +796,14 @@
         dest: /etc/nginx/sites-available/ambifo
         mode: "0644"
         content: |
-          # Redirect HTTP → HTTPS (ACME webroot stays reachable for renewal)
+          # Redirect HTTP → HTTPS
+          #
+          # The redirect MUST live inside a location block. A `return` at
+          # server context is a rewrite-phase directive and runs *before* any
+          # location is chosen, which would make the acme-challenge location
+          # below unreachable. certbot's --webroot plugin does not follow
+          # redirects, so that would break certificate renewal (~60 days out)
+          # while first issuance still appeared to work.
           server {
               listen 80;
               server_name {{ domain_name }};
@@ -794,7 +812,9 @@
                   root {{ www_dir }};
               }
 
-              return 301 https://$host$request_uri;
+              location / {
+                  return 301 https://$host$request_uri;
+              }
           }
 
           # HTTPS server (Let's Encrypt)
@@ -916,10 +936,26 @@
     - name: Enable UFW
       community.general.ufw:
         state: enabled
+        # `direction` must be explicit. Without it the module runs
+        # `ufw default deny`, which blocks incoming *and* outgoing - that
+        # breaks apt, git fetch, pip install and outbound SMTP (port 587).
         policy: deny
+        direction: incoming
+      when: enable_ufw
+
+    - name: Allow all outbound traffic (apt, git, pip, SMTP)
+      community.general.ufw:
+        rule: allow
+        direction: out
       when: enable_ufw
 
     # ── 14. Final verification ───────────────────────────────────
+    # Handlers are deferred to the end of the play, so without this flush the
+    # checks below would validate the *previously* running services instead of
+    # the ones just deployed.
+    - name: Apply pending service restarts before verifying
+      ansible.builtin.meta: flush_handlers
+
     - name: Wait for API to be ready
       ansible.builtin.uri:
         url: "http://{{ api_host }}:{{ api_port }}/health"
@@ -938,7 +974,9 @@
       register: engine_health
       retries: 10
       delay: 5
-      until: engine_health.status == 200
+      # /engine/health answers 200 even when the engine is down (it returns
+      # {"engine_ok": false}), so assert the payload, not just the status.
+      until: (engine_health.json | default({})).get('engine_ok', false) | bool
 
     - name: Verify HTTPS API health over the public domain
       ansible.builtin.uri:

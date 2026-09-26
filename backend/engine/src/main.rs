@@ -28,7 +28,11 @@ async fn main() {
         .with_state(std::sync::Arc::new(template::AppState));
 
     let port = std::env::var("ENGINE_PORT").unwrap_or_else(|_| "8081".into());
-    let addr = format!("0.0.0.0:{port}");
+    // Loopback only. The engine has no authentication and CORS is permissive,
+    // and /api/ai/generate spends the configured OpenAI/Gemini key, so it must
+    // not be reachable from outside the host. The API reaches it server-side
+    // over ENGINE_URL, so nothing else needs a wider bind.
+    let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind failed");
     tracing::info!("ambifo_engine listening on {addr}");
     axum::serve(listener, app).await.expect("server error");
