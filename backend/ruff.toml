@@ -1,6 +1,6 @@
 # Ruff configuration for the FastAPI backend.
 #
-# This file pins the rule set explicitly. Without it, `ruff check app/` runs
+# This file pins the rule set explicitly. Without it, `ruff check .` runs
 # whatever the installed Ruff happens to default to, so a Ruff release can
 # silently change the rules and break CI.
 #

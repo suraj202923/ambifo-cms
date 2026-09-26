@@ -25,7 +25,7 @@ jobs:
         run: |
           cd backend
           source .venv/bin/activate
-          ruff check app/
+          ruff check .
       - name: Type check
         run: |
           cd backend
