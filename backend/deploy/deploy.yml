@@ -214,7 +214,7 @@
 
     - name: Add NodeSource repository (Node 22)
       ansible.builtin.apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x {{ ansible_distribution_release }} main"
+        repo: "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x nodistro main"
         state: present
 
     - name: Install Node.js
