@@ -251,7 +251,7 @@
         || git config --global --add safe.directory "{{ repo_dir }}"
       args:
         executable: /bin/bash
-        become_user: "{{ app_user }}"
+      become_user: "{{ app_user }}"
       changed_when: false
 
     - name: Install git SSH deploy key (optional, for private repos)
