@@ -1,4 +1,3 @@
-# ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  Ambifo CRM v1 — AWS EC2 Deployment Playbook (Ansible)                    ║
 # ║                                                                           ║
 # ║  Deploys the three-tier stack on a single Ubuntu 24.04 EC2 instance:      ║
@@ -7,7 +6,7 @@
 # ║    · Worker   : Email polling worker        (run_worker.py)               ║
 # ║    · Frontend : React build served by nginx -> https://<domain>          ║
 # ║    · Database : PostgreSQL on the same instance (EBS persists data)       ║
-# ║    · TLS      : Let's Encrypt (certbot, webroot, auto-renewal timer)      ║
+# ║    · TLS      : Cloudflare Origin CA certificate (Full strict mode)      ║
 # ║    · Backup   : daily pg_dump systemd timer (+ optional S3 upload)        ║
 # ║                                                                           ║
 # ║  Run (from any machine with ansible + community.general):                 ║
@@ -15,7 +14,8 @@
 # ║    ansible-playbook -i hosts.ini deploy.yml \                             ║
 # ║      -e git_repo_url=https://github.com/you/ambifo-crm-v1 \               ║
 # ║      -e domain_name=crm.example.com \                                     ║
-# ║      -e letsencrypt_email=you@example.com \                               ║
+# ║      -e cloudflare_origin_cert_src=/path/to/origin.pem \                   ║
+# ║      -e cloudflare_origin_key_src=/path/to/origin.key \                    ║
 # ║      -e app_secret_key=<long-random> \                                    ║
 # ║      -e db_password=<db-pass> -e admin_password=<admin-pass> \            ║
 # ║      -e postgres_password=<postgres-superuser-pass>                       ║
@@ -27,9 +27,12 @@
 # ║                 use  -e ansible_ssh_private_key_file=/path/key.pem.       ║
 # ║   3. Security group: allow inbound  22 (SSH), 80, 443 (web).              ║
 # ║   4. Elastic IP: allocate one, associate it with the instance.            ║
-# ║   5. DNS      : point an A record for <domain_name> at the Elastic IP.    ║
-# ║                 HTTP-01 challenge needs 80 reachable BEFORE first run.    ║
-# ║   6. Remote   : override ansible_user (default ubuntu) in hosts.ini.      ║
+# ║   5. Cloudflare: proxy the DNS record (orange cloud), set SSL/TLS mode to ║
+# ║                 Full (strict), and create an Origin CA certificate for   ║
+# ║                 <domain_name>. Keep its cert/key on the Ansible machine. ║
+# ║                 Set cloudflare_origin_cert_src/key_src to their paths.   ║
+# ║   6. Network  : allow inbound 80 and 443 from Cloudflare (and 22 for SSH).║
+# ║   7. Remote   : override ansible_user (default ubuntu) in hosts.ini.      ║
 # ║                                                                           ║
 # ║  ── Repo prerequisites ───────────────────────────────────────────────────  ║
 # ║   · The repo must be committed and pushed to a host Ansible can reach     ║
@@ -43,8 +46,8 @@
 # ║     wards the playbook is incremental / idempotent and can be re-run to   ║
 # ║     pull the latest code (git pull) and restart services.                 ║
 # ║   · SMTP is optional and editable later on the in-app Settings page.      ║
-# ║   · To front the site with Cloudflare later, disable its proxy ("grey     ║
-# ║     cloud") or switch the DNS record — certbot handles TLS on EC2.        ║
+# ║   · Cloudflare Origin CA certificates are trusted by Cloudflare, not      ║
+# ║     browsers. Keep the DNS record proxied and use Full (strict) mode.     ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
 - name: Deploy Ambifo CRM v1 on AWS EC2 (Ubuntu)
@@ -85,8 +88,11 @@
     vite_api_url: "https://{{ domain_name }}"
     cors_origins: "https://{{ domain_name }}"
 
-    # ── TLS (Let's Encrypt) ──────────────────────────────────────
-    letsencrypt_email: ~            # REQUIRED — cert renewal notices
+    # ── TLS (Cloudflare Origin CA) ───────────────────────────────
+    cloudflare_origin_cert_src: ~   # REQUIRED — local path on Ansible controller
+    cloudflare_origin_key_src: ~    # REQUIRED — local private key path
+    cloudflare_origin_cert: "/etc/ssl/cloudflare/{{ domain_name }}.pem"
+    cloudflare_origin_key: "/etc/ssl/cloudflare/{{ domain_name }}.key"
 
     # ── database ─────────────────────────────────────────────────
     postgres_password: ~            # REQUIRED — postgres superuser password
@@ -129,7 +135,8 @@
         - { name: domain_name, value: "{{ domain_name | default('') }}" }
         - { name: app_secret_key, value: "{{ app_secret_key | default('') }}" }
         - { name: admin_password, value: "{{ admin_password | default('') }}" }
-        - { name: letsencrypt_email, value: "{{ letsencrypt_email | default('') }}" }
+        - { name: cloudflare_origin_cert_src, value: "{{ cloudflare_origin_cert_src | default('') }}" }
+        - { name: cloudflare_origin_key_src, value: "{{ cloudflare_origin_key_src | default('') }}" }
         - { name: db_password, value: "{{ db_password | default('') }}" }
         - { name: postgres_password, value: "{{ postgres_password | default('') }}" }
 
@@ -185,7 +192,6 @@
           - nginx
           - postgresql
           - postgresql-contrib
-          - certbot
           - ufw
           - curl
           - jq
@@ -701,7 +707,7 @@
       notify: Reload nginx
       changed_when: false
 
-    - name: Create web root directory (also used as ACME webroot)
+    - name: Create web root directory
       ansible.builtin.file:
         path: "{{ www_dir }}"
         state: directory
@@ -726,104 +732,67 @@
         group: "{{ app_group }}"
         mode: "0755"
 
-    # ── 12. Nginx + Let's Encrypt ────────────────────────────────
-    - name: Check whether a Let's Encrypt certificate already exists
-      ansible.builtin.stat:
-        path: "/etc/letsencrypt/live/{{ domain_name }}/fullchain.pem"
-      register: letsencrypt_cert
-
+    # ── 12. Nginx + Cloudflare Origin CA ──────────────────────────
     - name: Remove default Nginx site
       ansible.builtin.file:
         path: /etc/nginx/sites-enabled/default
         state: absent
       notify: Reload nginx
 
-    # Temporary port-80 config that only serves the ACME webroot, so the first
-    # certificate can be issued before the full HTTPS site is in place.
-    - name: Write temporary ACME webroot Nginx config
-      ansible.builtin.copy:
-        dest: /etc/nginx/sites-available/ambifo-acme
-        mode: "0644"
-        content: |
-          server {
-              listen 80;
-              server_name {{ domain_name }};
-              location /.well-known/acme-challenge/ {
-                  root {{ www_dir }};
-              }
-              location / {
-                  return 200 "ACME staging";
-              }
-          }
-      notify: Reload nginx
-      when: not letsencrypt_cert.stat.exists
-
-    - name: Enable temporary ACME site
+    - name: Create Cloudflare certificate directory
       ansible.builtin.file:
-        src: /etc/nginx/sites-available/ambifo-acme
-        dest: /etc/nginx/sites-enabled/ambifo-acme
-        state: link
-      notify: Reload nginx
-      when: not letsencrypt_cert.stat.exists
+        path: /etc/ssl/cloudflare
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
 
-    - name: Start nginx (needed for the ACME webroot challenge)
+    - name: Install Cloudflare Origin CA certificate
+      ansible.builtin.copy:
+        src: "{{ cloudflare_origin_cert_src }}"
+        dest: "{{ cloudflare_origin_cert }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload nginx
+
+    - name: Install Cloudflare Origin CA private key
+      ansible.builtin.copy:
+        src: "{{ cloudflare_origin_key_src }}"
+        dest: "{{ cloudflare_origin_key }}"
+        owner: root
+        group: root
+        mode: "0600"
+      notify: Reload nginx
+
+    - name: Start nginx
       ansible.builtin.service:
         name: nginx
         state: started
         enabled: true
-
-    - name: Issue Let's Encrypt certificate if missing
-      ansible.builtin.command: >
-        certbot certonly --webroot --webroot-path {{ www_dir }}
-        --non-interactive --agree-tos --email {{ letsencrypt_email }}
-        -d {{ domain_name }}
-      args:
-        creates: "/etc/letsencrypt/live/{{ domain_name }}/fullchain.pem"
-
-    - name: Remove temporary ACME site
-      ansible.builtin.file:
-        path: /etc/nginx/sites-enabled/ambifo-acme
-        state: absent
-      notify: Reload nginx
-
-    - name: Remove temporary ACME config
-      ansible.builtin.file:
-        path: /etc/nginx/sites-available/ambifo-acme
-        state: absent
 
     - name: Write Nginx site config (HTTPS, hardened)
       ansible.builtin.copy:
         dest: /etc/nginx/sites-available/ambifo
         mode: "0644"
         content: |
-          # Redirect HTTP → HTTPS
-          #
-          # The redirect MUST live inside a location block. A `return` at
-          # server context is a rewrite-phase directive and runs *before* any
-          # location is chosen, which would make the acme-challenge location
-          # below unreachable. certbot's --webroot plugin does not follow
-          # redirects, so that would break certificate renewal (~60 days out)
-          # while first issuance still appeared to work.
+          # Redirect HTTP → HTTPS.
           server {
               listen 80;
               server_name {{ domain_name }};
-
-              location /.well-known/acme-challenge/ {
-                  root {{ www_dir }};
-              }
 
               location / {
                   return 301 https://$host$request_uri;
               }
           }
 
-          # HTTPS server (Let's Encrypt)
+          # HTTPS server (Cloudflare Origin CA)
           server {
               listen 443 ssl http2;
               server_name {{ domain_name }};
 
-              ssl_certificate     /etc/letsencrypt/live/{{ domain_name }}/fullchain.pem;
-              ssl_certificate_key /etc/letsencrypt/live/{{ domain_name }}/privkey.pem;
+              ssl_certificate     {{ cloudflare_origin_cert }};
+              ssl_certificate_key {{ cloudflare_origin_key }};
               ssl_protocols       TLSv1.2 TLSv1.3;
               ssl_ciphers         HIGH:!aNULL:!MD5;
               ssl_prefer_server_ciphers on;
@@ -902,23 +871,6 @@
       ansible.builtin.service:
         name: nginx
         state: reloaded
-
-    - name: Ensure certbot reloads nginx after renewals
-      ansible.builtin.copy:
-        dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
-        content: |
-          #!/bin/sh
-          systemctl reload nginx || true
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Enable certbot auto-renewal timer
-      ansible.builtin.systemd:
-        name: certbot.timer
-        enabled: true
-        state: started
-        daemon_reload: true
 
     # ── 13. Firewall ─────────────────────────────────────────────
     - name: Allow SSH through UFW
@@ -1009,7 +961,7 @@
              API logs  : journalctl -u ambifo-api -f
              Worker    : journalctl -u ambifo-worker -f
              Engine    : journalctl -u ambifo-engine -f
-             Renewal   : systemctl list-timers certbot.timer
+             TLS       : Cloudflare Origin CA (renew the certificate in Cloudflare before expiry)
              Health    : https://{{ domain_name }}/health
              Default login: {{ admin_username }} (password set via -e admin_password)
 
