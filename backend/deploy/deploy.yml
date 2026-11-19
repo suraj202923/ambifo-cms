@@ -262,6 +262,7 @@
         mode: "0600"
       when: git_ssh_key is defined and git_ssh_key
 
+    
     - name: Clone repository (first run) or pull latest (re-runs)
       ansible.builtin.git:
         repo: "{{ git_repo_url }}"
@@ -270,12 +271,15 @@
         force: true
         update: true
         accept_newhostkey: true
+      become_user: "{{ app_user }}"
       environment:
+        HOME: "/home/{{ app_user }}"
         GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new{{ (' -i /home/' ~ app_user ~ '/.ssh/id_ed25519') if (git_ssh_key is defined and git_ssh_key) else '' }}"
       notify:
         - Restart ambifo-api
         - Restart ambifo-engine
         - Restart ambifo-worker
+
 
     - name: Set repo ownership after clone
       ansible.builtin.file:
